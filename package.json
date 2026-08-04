@@ -1,0 +1,27 @@
+{
+  "name": "maison-solene",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^16.3.0",
+    "next-sanity": "^13.3.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "sanity": "^6.8.0",
+    "@sanity/vision": "^6.8.0",
+    "@sanity/image-url": "^2.1.1"
+  },
+  "devDependencies": {
+    "@sanity/client": "^7.26.0",
+    "typescript": "^5.7.0",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4"
+  }
+}
