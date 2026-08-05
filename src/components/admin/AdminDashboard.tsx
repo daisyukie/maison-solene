@@ -135,10 +135,10 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
     cleaned.bookingSidebarMedia = sanitizeMedia(cleaned.bookingSidebarMedia)
 
     if (cleaned.homeGallery) {
-      cleaned.homeGallery = cleaned.homeGallery.map((m) => sanitizeMedia(m)!).filter(Boolean)
+      cleaned.homeGallery = [0, 1, 2].map((i) => sanitizeMedia(cleaned.homeGallery?.[i]) || { hint: `foto ${i + 1}` })
     }
     if (cleaned.houseGallery) {
-      cleaned.houseGallery = cleaned.houseGallery.map((m) => sanitizeMedia(m)!).filter(Boolean)
+      cleaned.houseGallery = [0, 1, 2].map((i) => sanitizeMedia(cleaned.houseGallery?.[i]) || { hint: `foto ${i + 1}` })
     }
     if (cleaned.massages) {
       cleaned.massages = cleaned.massages.map((m) => ({ ...m, media: sanitizeMedia(m.media) }))
