@@ -1,28 +1,40 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 
-async function translatePtToEn(text: string): Promise<string> {
+async function translateChunk(text: string): Promise<string> {
   if (!text || !text.trim()) return text
 
-  // Preserve <br /> tags during translation
-  const brMarker = '___BR_TAG___'
-  const preparedText = text.replace(/<br\s*\/?>/gi, brMarker)
+  // Preserve <br /> tags
+  const BR_MARKER = '___BR_TAG___'
+  const preparedText = text.replace(/<br\s*\/?>/gi, BR_MARKER)
 
+  // 1. Try MyMemory API
   try {
     const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(preparedText)}&langpair=pt|en`
-    const res = await fetch(url)
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000) })
     if (res.ok) {
       const data = await res.json()
-      if (data?.responseData?.translatedText) {
+      if (data?.responseData?.translatedText && !data.responseData.translatedText.includes('MYMEMORY WARNING')) {
         let translated = data.responseData.translatedText
-        // Restore <br /> tags
         translated = translated.replace(/___BR_TAG___/gi, '<br />')
         return translated
       }
     }
-  } catch (err) {
-    console.error('Translation error:', err)
-  }
+  } catch {}
+
+  // 2. Fallback: Google Translate Free Endpoint
+  try {
+    const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=pt&tl=en&dt=t&q=${encodeURIComponent(preparedText)}`
+    const gRes = await fetch(gUrl, { signal: AbortSignal.timeout(6000) })
+    if (gRes.ok) {
+      const gData = await gRes.json()
+      if (Array.isArray(gData?.[0])) {
+        let translated = gData[0].map((item: [string]) => item[0]).join('')
+        translated = translated.replace(/___BR_TAG___/gi, '<br />')
+        return translated
+      }
+    }
+  } catch {}
 
   return text
 }
@@ -36,25 +48,14 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json()
-    const { text, target } = body
+    const { text } = body
 
-    if (text && typeof text === 'string') {
-      const translatedText = await translatePtToEn(text)
-      return NextResponse.json({ success: true, translatedText })
+    if (!text || typeof text !== 'string') {
+      return NextResponse.json({ error: 'Texto não fornecido' }, { status: 400 })
     }
 
-    if (target && typeof target === 'object') {
-      // Process batch object translation if requested
-      const result: Record<string, string> = {}
-      for (const [key, ptVal] of Object.entries(target)) {
-        if (typeof ptVal === 'string' && ptVal.trim()) {
-          result[key] = await translatePtToEn(ptVal)
-        }
-      }
-      return NextResponse.json({ success: true, translations: result })
-    }
-
-    return NextResponse.json({ error: 'Texto não fornecido' }, { status: 400 })
+    const translatedText = await translateChunk(text)
+    return NextResponse.json({ success: true, translatedText })
   } catch (err) {
     console.error('API Translate Error:', err)
     return NextResponse.json({ error: 'Erro ao traduzir texto' }, { status: 500 })

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { SiteContent, LocaleString, SiteMedia, Massage, TimelineStep, HouseRule, FaqItem, Addition, Stat } from '@/sanity/lib/types'
 import MediaUploader from './MediaUploader'
 
@@ -11,13 +11,38 @@ interface AdminDashboardProps {
 
 type TabType = 'brand' | 'home' | 'house' | 'rates' | 'booking'
 
+interface ToastState {
+  message: string
+  type: 'success' | 'error' | 'info'
+}
+
+const LOCAL_STORAGE_KEY = 'maison_solene_content_backup'
+
 export default function AdminDashboard({ initialContent, onLogout }: AdminDashboardProps) {
   const [content, setContent] = useState<SiteContent>(initialContent)
   const [activeTab, setActiveTab] = useState<TabType>('brand')
   const [saving, setSaving] = useState(false)
-  const [saveMessage, setSaveMessage] = useState('')
+  const [toast, setToast] = useState<ToastState | null>(null)
   const [translatingField, setTranslatingField] = useState<string | null>(null)
   const [translatingAll, setTranslatingAll] = useState(false)
+
+  // On mount, check if browser has a newer local backup
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(LOCAL_STORAGE_KEY)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (parsed && typeof parsed === 'object') {
+          setContent((prev) => ({ ...prev, ...parsed }))
+        }
+      }
+    } catch {}
+  }, [])
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 5000)
+  }
 
   // Generic updater
   const updateField = <K extends keyof SiteContent>(key: K, value: SiteContent[K]) => {
@@ -41,7 +66,7 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
   // Single field auto-translate
   const handleTranslateField = async (fieldKey: string, ptText: string, onSuccess: (enText: string) => void) => {
     if (!ptText || !ptText.trim()) {
-      alert('Preencha primeiro o texto em Português antes de traduzir.')
+      showToast('Preencha primeiro o texto em Português antes de traduzir.', 'info')
       return
     }
     setTranslatingField(fieldKey)
@@ -54,11 +79,12 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
       const data = await res.json()
       if (data.translatedText) {
         onSuccess(data.translatedText)
+        showToast('✨ Campo traduzido com sucesso!', 'success')
       } else {
-        alert(data.error || 'Erro na tradução')
+        showToast(data.error || 'Erro na tradução', 'error')
       }
     } catch {
-      alert('Falha ao conectar com o serviço de tradução')
+      showToast('Falha ao conectar com o serviço de tradução', 'error')
     } finally {
       setTranslatingField(null)
     }
@@ -67,25 +93,74 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
   // Save changes
   const handleSave = async () => {
     setSaving(true)
-    setSaveMessage('')
+
+    // Calculate payload size
+    const jsonString = JSON.stringify(content)
+    const payloadBytes = new Blob([jsonString]).size
+    const payloadMB = payloadBytes / (1024 * 1024)
+
+    if (payloadMB > 3.8) {
+      showToast(`O conteúdo do site (${payloadMB.toFixed(1)}MB) está próximo do limite de 4.5MB da Vercel. Por favor, utilize links diretos de vídeo para economizar espaço.`, 'error')
+      setSaving(false)
+      return
+    }
+
     try {
+      // Save client backup
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, jsonString)
+      } catch {}
+
       const res = await fetch('/api/content', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(content),
+        body: jsonString,
       })
       const data = await res.json()
       if (data.success) {
-        setSaveMessage('✅ Alterações salvas com sucesso!')
-        setTimeout(() => setSaveMessage(''), 4000)
+        showToast('✅ Alterações salvas com sucesso no site e no navegador!', 'success')
       } else {
-        alert(data.error || 'Erro ao salvar alterações')
+        showToast(data.error || 'Erro ao salvar alterações na Vercel', 'error')
       }
-    } catch {
-      alert('Erro na requisição ao salvar')
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Erro na requisição'
+      showToast(`Erro ao salvar na Vercel (${errorMessage}). O backup local foi mantido.`, 'error')
     } finally {
       setSaving(false)
     }
+  }
+
+  // Export JSON Backup
+  const handleExportBackup = () => {
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(content, null, 2))
+    const dlAnchor = document.createElement('a')
+    dlAnchor.setAttribute('href', dataStr)
+    dlAnchor.setAttribute('download', `maison_solene_backup_${new Date().toISOString().slice(0, 10)}.json`)
+    document.body.appendChild(dlAnchor)
+    dlAnchor.click()
+    dlAnchor.remove()
+    showToast('📥 Backup JSON baixado para o seu computador!', 'success')
+  }
+
+  // Import JSON Backup
+  const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string)
+        if (parsed && typeof parsed === 'object') {
+          setContent(parsed)
+          showToast('📤 Backup JSON restaurado com sucesso! Clique em "Salvar Alterações".', 'success')
+        } else {
+          showToast('Arquivo de backup inválido', 'error')
+        }
+      } catch {
+        showToast('Erro ao ler o arquivo JSON de backup', 'error')
+      }
+    }
+    reader.readAsText(file)
   }
 
   // Auto translate all empty EN fields across content
@@ -93,42 +168,47 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
     if (!confirm('Deseja preencher automaticamente todos os campos em Inglês que estiverem em branco?')) return
 
     setTranslatingAll(true)
+    showToast('Iniciando tradução automática do site...', 'info')
+
     try {
       const newContent = JSON.parse(JSON.stringify(content)) as SiteContent
 
       const autoTrans = async (loc?: LocaleString): Promise<LocaleString | undefined> => {
         if (!loc || !loc.pt) return loc
         if (!loc.en || !loc.en.trim()) {
-          const res = await fetch('/api/translate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: loc.pt }),
-          })
-          const data = await res.json()
-          if (data.translatedText) {
-            return { pt: loc.pt, en: data.translatedText }
-          }
+          try {
+            const res = await fetch('/api/translate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: loc.pt }),
+            })
+            const data = await res.json()
+            if (data.translatedText) {
+              return { pt: loc.pt, en: data.translatedText }
+            }
+          } catch {}
         }
         return loc
       }
 
-      // Brand
       newContent.addressNote = await autoTrans(newContent.addressNote)
       newContent.hoursLine = await autoTrans(newContent.hoursLine)
       newContent.hoursNote = await autoTrans(newContent.hoursNote)
       newContent.footerTagline = await autoTrans(newContent.footerTagline)
-
-      // Home
       newContent.heroEyebrow = await autoTrans(newContent.heroEyebrow)
+
       if (newContent.heroTitlePt && (!newContent.heroTitleEn || !newContent.heroTitleEn.trim())) {
-        const res = await fetch('/api/translate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: newContent.heroTitlePt }),
-        })
-        const data = await res.json()
-        if (data.translatedText) newContent.heroTitleEn = data.translatedText
+        try {
+          const res = await fetch('/api/translate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: newContent.heroTitlePt }),
+          })
+          const data = await res.json()
+          if (data.translatedText) newContent.heroTitleEn = data.translatedText
+        } catch {}
       }
+
       newContent.heroSubtitle = await autoTrans(newContent.heroSubtitle)
       newContent.houseIntroEyebrow = await autoTrans(newContent.houseIntroEyebrow)
       newContent.houseIntroParagraph = await autoTrans(newContent.houseIntroParagraph)
@@ -150,8 +230,6 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
 
       newContent.videoBannerQuote = await autoTrans(newContent.videoBannerQuote)
       newContent.videoBannerCaption = await autoTrans(newContent.videoBannerCaption)
-
-      // House
       newContent.houseHeroEyebrow = await autoTrans(newContent.houseHeroEyebrow)
       newContent.houseHeroTitle = await autoTrans(newContent.houseHeroTitle)
       newContent.houseHeroSubtitle = await autoTrans(newContent.houseHeroSubtitle)
@@ -186,7 +264,6 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
         }
       }
 
-      // Rates
       newContent.ratesEyebrow = await autoTrans(newContent.ratesEyebrow)
       newContent.ratesTitle = await autoTrans(newContent.ratesTitle)
       newContent.eveningRitualQuote = await autoTrans(newContent.eveningRitualQuote)
@@ -205,17 +282,15 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
       newContent.paymentBody = await autoTrans(newContent.paymentBody)
       newContent.cancellationTitle = await autoTrans(newContent.cancellationTitle)
       newContent.cancellationBody = await autoTrans(newContent.cancellationBody)
-
-      // Booking
       newContent.bookingEyebrow = await autoTrans(newContent.bookingEyebrow)
       newContent.bookingTitle = await autoTrans(newContent.bookingTitle)
       newContent.bookingBeforeSendNote = await autoTrans(newContent.bookingBeforeSendNote)
       newContent.bookingConfirmation = await autoTrans(newContent.bookingConfirmation)
 
       setContent(newContent)
-      alert('Tradução automática concluída! Clique em "Salvar Alterações" para aplicar.')
+      showToast('✨ Tradução concluída! Clique em "Salvar Alterações" para publicar.', 'success')
     } catch {
-      alert('Erro durante a tradução automática')
+      showToast('Erro durante a tradução automática', 'error')
     } finally {
       setTranslatingAll(false)
     }
@@ -362,6 +437,31 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}
     >
+      {/* Toast Notification Banner */}
+      {toast && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            zIndex: 9999,
+            background: toast.type === 'success' ? '#183823' : toast.type === 'error' ? '#4A151D' : '#1F2A38',
+            border: `1px solid ${toast.type === 'success' ? '#276E40' : toast.type === 'error' ? '#B0243A' : '#3A5B80'}`,
+            color: toast.type === 'success' ? '#6CE097' : toast.type === 'error' ? '#FF9EA9' : '#9ECBFF',
+            padding: '14px 20px',
+            borderRadius: 8,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
+            fontSize: 13,
+            maxWidth: 420,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <span>{toast.message}</span>
+        </div>
+      )}
+
       {/* Top Header Bar */}
       <header
         style={{
@@ -370,10 +470,12 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
           zIndex: 100,
           background: '#130D0F',
           borderBottom: '1px solid rgba(201,162,91,.2)',
-          padding: '16px 24px',
+          padding: '14px 24px',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 12,
           boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
         }}
       >
@@ -388,12 +490,45 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
               textTransform: 'uppercase',
             }}
           >
-            Maison Solène · Painel Admin
+            Maison Solène · Admin
           </h1>
-          {saveMessage && <span style={{ fontSize: 13, color: '#C9A25B', fontWeight: 500 }}>{saveMessage}</span>}
         </div>
 
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={handleExportBackup}
+            title="Baixar cópia de segurança em arquivo JSON"
+            style={{
+              background: 'transparent',
+              border: '1px solid rgba(201,162,91,.3)',
+              color: '#C9A25B',
+              padding: '7px 12px',
+              borderRadius: 6,
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            📥 Backup JSON
+          </button>
+
+          <label
+            title="Restaurar um arquivo de backup JSON salvo no computador"
+            style={{
+              background: 'transparent',
+              border: '1px solid rgba(201,162,91,.3)',
+              color: '#C9A25B',
+              padding: '7px 12px',
+              borderRadius: 6,
+              fontSize: 12,
+              cursor: 'pointer',
+              display: 'inline-block',
+            }}
+          >
+            📤 Restaurar
+            <input type="file" accept=".json" onChange={handleImportBackup} style={{ display: 'none' }} />
+          </label>
+
           <button
             type="button"
             disabled={translatingAll}
@@ -678,9 +813,37 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
             )}
 
             {/* Stats Array */}
-            <h4 style={{ fontSize: 14, color: '#EDE6DD', marginTop: 20, marginBottom: 12 }}>Estatísticas / Números (até 3)</h4>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 12 }}>
+              <h4 style={{ fontSize: 14, color: '#EDE6DD', margin: 0 }}>Estatísticas / Números</h4>
+              <button
+                type="button"
+                onClick={() => {
+                  const arr = [...(content.stats || [])]
+                  arr.push({ number: '01', label: { pt: 'Nova estatística', en: 'New stat' } })
+                  updateField('stats', arr)
+                }}
+                style={{ background: 'rgba(201,162,91,.15)', border: '1px solid rgba(201,162,91,.4)', color: '#C9A25B', fontSize: 12, padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}
+              >
+                + Adicionar Stat
+              </button>
+            </div>
+
             {(content.stats || []).map((st, idx) => (
-              <div key={idx} style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.15)', borderRadius: 8, padding: 16, marginBottom: 12 }}>
+              <div key={idx} style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.15)', borderRadius: 8, padding: 16, marginBottom: 12, position: 'relative' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: 12, color: '#C9A25B' }}>Stat #{idx + 1}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const arr = [...(content.stats || [])]
+                      arr.splice(idx, 1)
+                      updateField('stats', arr)
+                    }}
+                    style={{ background: 'transparent', border: 'none', color: '#E06B78', fontSize: 12, cursor: 'pointer' }}
+                  >
+                    Excluir
+                  </button>
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 14, alignItems: 'center' }}>
                   <div>
                     <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Número</label>
@@ -721,6 +884,26 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
             )}
 
             {/* Massagens Array */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h4 style={{ fontSize: 14, color: '#EDE6DD', margin: 0 }}>Lista de Massagens</h4>
+              <button
+                type="button"
+                onClick={() => {
+                  const arr = [...(content.massages || [])]
+                  arr.push({
+                    title: { pt: 'Nova Massagem', en: 'New Massage' },
+                    homeDescription: { pt: 'Descrição curta...', en: 'Short description...' },
+                    rateDescription: { pt: 'Descrição de valores...', en: 'Rate description...' },
+                    duration1: "60'", duration2: "90'", price1: '€100', price2: '€150',
+                  })
+                  updateField('massages', arr)
+                }}
+                style={{ background: 'rgba(201,162,91,.15)', border: '1px solid rgba(201,162,91,.4)', color: '#C9A25B', fontSize: 12, padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}
+              >
+                + Adicionar Massagem
+              </button>
+            </div>
+
             {(content.massages || []).map((msg, idx) => (
               <div
                 key={idx}
@@ -732,9 +915,22 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
                   marginBottom: 20,
                 }}
               >
-                <h4 style={{ color: '#C9A25B', margin: '0 0 16px 0', fontSize: 15 }}>
-                  Massagem #{idx + 1}: {msg.title?.pt || ''}
-                </h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <h4 style={{ color: '#C9A25B', margin: 0, fontSize: 15 }}>
+                    Massagem #{idx + 1}: {msg.title?.pt || ''}
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const arr = [...(content.massages || [])]
+                      arr.splice(idx, 1)
+                      updateField('massages', arr)
+                    }}
+                    style={{ background: 'transparent', border: '1px solid rgba(176,36,58,.4)', color: '#E06B78', fontSize: 12, padding: '4px 8px', borderRadius: 4, cursor: 'pointer' }}
+                  >
+                    Excluir Massagem
+                  </button>
+                </div>
 
                 {renderLocaleInput('Título da Massagem', `msg_title_${idx}`, msg.title, (newLoc) => {
                   const arr = [...(content.massages || [])]
@@ -835,7 +1031,7 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
               onChange={(media) => updateField('videoBannerMedia', media)}
             />
 
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Galeria da Página Inicial (3 mídias)</h3>
+            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Galeria da Página Inicial</h3>
             {(content.homeGallery || [{}, {}, {}]).slice(0, 3).map((item, idx) => (
               <MediaUploader
                 key={idx}
@@ -882,9 +1078,41 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
             )}
 
             {/* Timeline Steps Array */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h4 style={{ fontSize: 14, color: '#EDE6DD', margin: 0 }}>Etapas da Timeline</h4>
+              <button
+                type="button"
+                onClick={() => {
+                  const arr = [...(content.timelineSteps || [])]
+                  arr.push({
+                    kicker: { pt: 'Nova etapa', en: 'New step' },
+                    title: { pt: 'Título', en: 'Title' },
+                    body: { pt: 'Descrição...', en: 'Description...' },
+                  })
+                  updateField('timelineSteps', arr)
+                }}
+                style={{ background: 'rgba(201,162,91,.15)', border: '1px solid rgba(201,162,91,.4)', color: '#C9A25B', fontSize: 12, padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}
+              >
+                + Adicionar Etapa
+              </button>
+            </div>
+
             {(content.timelineSteps || []).map((step, idx) => (
               <div key={idx} style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.25)', borderRadius: 8, padding: 20, marginBottom: 20 }}>
-                <h4 style={{ color: '#C9A25B', margin: '0 0 16px 0', fontSize: 15 }}>Etapa #{idx + 1}: {step.title?.pt || ''}</h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <h4 style={{ color: '#C9A25B', margin: 0, fontSize: 15 }}>Etapa #{idx + 1}: {step.title?.pt || ''}</h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const arr = [...(content.timelineSteps || [])]
+                      arr.splice(idx, 1)
+                      updateField('timelineSteps', arr)
+                    }}
+                    style={{ background: 'transparent', border: '1px solid rgba(176,36,58,.4)', color: '#E06B78', fontSize: 12, padding: '4px 8px', borderRadius: 4, cursor: 'pointer' }}
+                  >
+                    Excluir Etapa
+                  </button>
+                </div>
 
                 {renderLocaleInput('Kicker / Horário (ex: 23h05 · a rua)', `ts_kicker_${idx}`, step.kicker, (newLoc) => {
                   const arr = [...(content.timelineSteps || [])]
@@ -921,7 +1149,7 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
               true
             )}
 
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Galeria "A Casa" (3 mídias)</h3>
+            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Galeria "A Casa"</h3>
             {(content.houseGallery || [{}, {}, {}]).slice(0, 3).map((item, idx) => (
               <MediaUploader
                 key={idx}
@@ -935,7 +1163,7 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
               />
             ))}
 
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Seção 02 — Regras da Casa (5 Regras)</h3>
+            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Seção 02 — Regras da Casa</h3>
             {renderLocaleInput('Selo das Regras', 'rulesEyebrow', content.rulesEyebrow, (v) =>
               updateField('rulesEyebrow', v)
             )}
@@ -947,9 +1175,37 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
               true
             )}
 
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h4 style={{ fontSize: 14, color: '#EDE6DD', margin: 0 }}>Lista de Regras</h4>
+              <button
+                type="button"
+                onClick={() => {
+                  const arr = [...(content.houseRules || [])]
+                  arr.push({ title: { pt: 'Nova Regra', en: 'New Rule' }, body: { pt: 'Descrição...', en: 'Description...' } })
+                  updateField('houseRules', arr)
+                }}
+                style={{ background: 'rgba(201,162,91,.15)', border: '1px solid rgba(201,162,91,.4)', color: '#C9A25B', fontSize: 12, padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}
+              >
+                + Adicionar Regra
+              </button>
+            </div>
+
             {(content.houseRules || []).map((rule, idx) => (
               <div key={idx} style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-                <h4 style={{ color: '#C9A25B', margin: '0 0 12px 0', fontSize: 14 }}>Regra #{idx + 1}</h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h4 style={{ color: '#C9A25B', margin: 0, fontSize: 14 }}>Regra #{idx + 1}</h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const arr = [...(content.houseRules || [])]
+                      arr.splice(idx, 1)
+                      updateField('houseRules', arr)
+                    }}
+                    style={{ background: 'transparent', border: 'none', color: '#E06B78', fontSize: 12, cursor: 'pointer' }}
+                  >
+                    Excluir
+                  </button>
+                </div>
                 {renderLocaleInput('Título da Regra', `rule_title_${idx}`, rule.title, (newLoc) => {
                   const arr = [...(content.houseRules || [])]
                   arr[idx] = { ...arr[idx], title: newLoc }
@@ -968,9 +1224,37 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
               updateField('faqEyebrow', v)
             )}
 
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h4 style={{ fontSize: 14, color: '#EDE6DD', margin: 0 }}>Perguntas Frequentes</h4>
+              <button
+                type="button"
+                onClick={() => {
+                  const arr = [...(content.faq || [])]
+                  arr.push({ question: { pt: 'Nova Pergunta?', en: 'New Question?' }, answer: { pt: 'Resposta...', en: 'Answer...' } })
+                  updateField('faq', arr)
+                }}
+                style={{ background: 'rgba(201,162,91,.15)', border: '1px solid rgba(201,162,91,.4)', color: '#C9A25B', fontSize: 12, padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}
+              >
+                + Adicionar Pergunta
+              </button>
+            </div>
+
             {(content.faq || []).map((item, idx) => (
               <div key={idx} style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-                <h4 style={{ color: '#C9A25B', margin: '0 0 12px 0', fontSize: 14 }}>Pergunta #{idx + 1}</h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h4 style={{ color: '#C9A25B', margin: 0, fontSize: 14 }}>Pergunta #{idx + 1}</h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const arr = [...(content.faq || [])]
+                      arr.splice(idx, 1)
+                      updateField('faq', arr)
+                    }}
+                    style={{ background: 'transparent', border: 'none', color: '#E06B78', fontSize: 12, cursor: 'pointer' }}
+                  >
+                    Excluir
+                  </button>
+                </div>
                 {renderLocaleInput('Pergunta', `faq_q_${idx}`, item.question, (newLoc) => {
                   const arr = [...(content.faq || [])]
                   arr[idx] = { ...arr[idx], question: newLoc }
@@ -1012,14 +1296,42 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
               updateField('eveningRitualLabel', v)
             )}
 
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Acréscimos (3 itens)</h3>
+            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Acréscimos</h3>
             {renderLocaleInput('Selo dos Acréscimos', 'additionsEyebrow', content.additionsEyebrow, (v) =>
               updateField('additionsEyebrow', v)
             )}
 
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h4 style={{ fontSize: 14, color: '#EDE6DD', margin: 0 }}>Lista de Acréscimos</h4>
+              <button
+                type="button"
+                onClick={() => {
+                  const arr = [...(content.additions || [])]
+                  arr.push({ title: { pt: 'Novo Acréscimo', en: 'New Addition' }, value: { pt: '€50', en: '€50' }, body: { pt: 'Descrição...', en: 'Description...' } })
+                  updateField('additions', arr)
+                }}
+                style={{ background: 'rgba(201,162,91,.15)', border: '1px solid rgba(201,162,91,.4)', color: '#C9A25B', fontSize: 12, padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}
+              >
+                + Adicionar Acréscimo
+              </button>
+            </div>
+
             {(content.additions || []).map((add, idx) => (
               <div key={idx} style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-                <h4 style={{ color: '#C9A25B', margin: '0 0 12px 0', fontSize: 14 }}>Acréscimo #{idx + 1}</h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h4 style={{ color: '#C9A25B', margin: 0, fontSize: 14 }}>Acréscimo #{idx + 1}</h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const arr = [...(content.additions || [])]
+                      arr.splice(idx, 1)
+                      updateField('additions', arr)
+                    }}
+                    style={{ background: 'transparent', border: 'none', color: '#E06B78', fontSize: 12, cursor: 'pointer' }}
+                  >
+                    Excluir
+                  </button>
+                </div>
                 {renderLocaleInput('Título', `add_title_${idx}`, add.title, (newLoc) => {
                   const arr = [...(content.additions || [])]
                   arr[idx] = { ...arr[idx], title: newLoc }
