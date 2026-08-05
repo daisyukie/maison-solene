@@ -175,23 +175,43 @@ export const DEFAULT_SITE_CONTENT: SiteContent = {
   bookingConfirmation: { pt: 'Pedido recebido. Confirmamos por mensagem em algumas horas.', en: 'Request received. We confirm by message within a few hours.' },
 }
 
+let inMemoryContent: SiteContent | null = null
+const PRIMARY_PATH = path.join(process.cwd(), 'data', 'siteContent.json')
+const FALLBACK_PATH = path.join('/tmp', 'siteContent.json')
+
 export function getSiteContent(): SiteContent {
+  if (inMemoryContent) return inMemoryContent
   try {
-    if (fs.existsSync(DATA_FILE_PATH)) {
-      const raw = fs.readFileSync(DATA_FILE_PATH, 'utf-8')
-      const parsed = JSON.parse(raw)
-      return { ...DEFAULT_SITE_CONTENT, ...parsed }
+    if (fs.existsSync(PRIMARY_PATH)) {
+      const raw = fs.readFileSync(PRIMARY_PATH, 'utf-8')
+      inMemoryContent = { ...DEFAULT_SITE_CONTENT, ...JSON.parse(raw) }
+      return inMemoryContent!
     }
-  } catch (err) {
-    console.error('Error reading content file:', err)
-  }
-  return DEFAULT_SITE_CONTENT
+  } catch {}
+  try {
+    if (fs.existsSync(FALLBACK_PATH)) {
+      const raw = fs.readFileSync(FALLBACK_PATH, 'utf-8')
+      inMemoryContent = { ...DEFAULT_SITE_CONTENT, ...JSON.parse(raw) }
+      return inMemoryContent!
+    }
+  } catch {}
+
+  inMemoryContent = { ...DEFAULT_SITE_CONTENT }
+  return inMemoryContent
 }
 
 export function saveSiteContent(content: SiteContent): void {
-  const dir = path.dirname(DATA_FILE_PATH)
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
+  inMemoryContent = content
+  try {
+    const dir = path.dirname(PRIMARY_PATH)
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(PRIMARY_PATH, JSON.stringify(content, null, 2), 'utf-8')
+    return
+  } catch {}
+
+  try {
+    fs.writeFileSync(FALLBACK_PATH, JSON.stringify(content, null, 2), 'utf-8')
+  } catch (err) {
+    console.error('Error saving fallback content:', err)
   }
-  fs.writeFileSync(DATA_FILE_PATH, JSON.stringify(content, null, 2), 'utf-8')
 }

@@ -20,19 +20,24 @@ export async function POST(request: Request) {
 
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
+    const base64 = buffer.toString('base64')
+    const mime = file.type || (file.name.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg')
+    const dataUrl = `data:${mime};base64,${base64}`
 
-    const uploadsDir = path.join(process.cwd(), 'public', 'uploads')
-    await mkdir(uploadsDir, { recursive: true })
-
-    const ext = path.extname(file.name) || (file.type.startsWith('video/') ? '.mp4' : '.jpg')
-    const sanitizeName = file.name.replace(/[^a-zA-Z0-9_-]/g, '_')
-    const fileName = `${Date.now()}_${sanitizeName}${ext.includes('.') ? '' : ext}`
-    const filePath = path.join(uploadsDir, fileName)
-
-    await writeFile(filePath, buffer)
-
-    const publicUrl = `/uploads/${fileName}`
-    return NextResponse.json({ success: true, url: publicUrl })
+    // Try saving locally if possible
+    try {
+      const uploadsDir = path.join(process.cwd(), 'public', 'uploads')
+      await mkdir(uploadsDir, { recursive: true })
+      const ext = path.extname(file.name) || (file.type.startsWith('video/') ? '.mp4' : '.jpg')
+      const sanitizeName = file.name.replace(/[^a-zA-Z0-9_-]/g, '_')
+      const fileName = `${Date.now()}_${sanitizeName}${ext.includes('.') ? '' : ext}`
+      const filePath = path.join(uploadsDir, fileName)
+      await writeFile(filePath, buffer)
+      return NextResponse.json({ success: true, url: `/uploads/${fileName}` })
+    } catch {
+      // Fallback for serverless Vercel: return base64 Data URL so media displays everywhere immediately
+      return NextResponse.json({ success: true, url: dataUrl })
+    }
   } catch (err) {
     console.error('Error uploading file:', err)
     return NextResponse.json({ error: 'Erro ao processar upload' }, { status: 500 })
