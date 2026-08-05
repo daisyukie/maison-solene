@@ -20,6 +20,7 @@
     "pt": "Criamos um lugar pequeno e silencioso para uma única coisa: ser cuidado sem pressa. Poucas salas, poucos horários por dia e discrição completa a partir da porta.",
     "en": "We built a small, quiet place for one thing only: to be attended to without hurry. Few rooms, few bookings a day, and complete discretion from the door onwards."
   },
+  "houseIntroMedia": { "hint": "foto / vídeo · a casa" },
   "stats": [
     { "number": "04", "label": { "pt": "Suítes privativas, nunca compartilhadas", "en": "Private suites, never shared" } },
     { "number": "60'", "label": { "pt": "Sessão mínima — nenhuma hora corrida", "en": "Minimum session — no rushed hours" } },

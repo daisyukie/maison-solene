@@ -282,7 +282,12 @@ export function renderSiteHtml(content: SiteContent): string {
       </div>
 
       <div style="padding:clamp(90px,16vh,180px) clamp(20px,5vw,64px);display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:clamp(40px,6vw,90px);align-items:start;max-width:1440px;margin:0 auto">
-        <span data-reveal=""${dataEn(content.houseIntroEyebrow)} style="font-size:10px;letter-spacing:.42em;text-transform:uppercase;color:#8C7444;font-weight:400">${escText(pt(content.houseIntroEyebrow))}</span>
+        <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+          <span data-reveal=""${dataEn(content.houseIntroEyebrow)} style="font-size:10px;letter-spacing:.42em;text-transform:uppercase;color:#8C7444;font-weight:400">${escText(pt(content.houseIntroEyebrow))}</span>
+          <div style="position:relative;height:clamp(260px,36vh,380px);border:1px solid rgba(201,162,91,.16);overflow:hidden;border-radius:6px">
+            ${mediaBlock(content.houseIntroMedia)}
+          </div>
+        </div>
         <div style="grid-column:span 2;display:flex;flex-direction:column;gap:30px;min-width:0">
           <p data-reveal=""${dataEn(content.houseIntroParagraph)} style="margin:0;font-family:'Bodoni Moda',serif;font-weight:400;font-size:clamp(20px,2vw,30px);line-height:1.4;color:#EDE6DD;text-wrap:pretty">${escText(pt(content.houseIntroParagraph))}</p>
           <div data-reveal="" data-reveal-delay="120" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:28px;padding-top:14px;border-top:1px solid rgba(201,162,91,.14)">

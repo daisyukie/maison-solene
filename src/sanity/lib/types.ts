@@ -73,6 +73,7 @@ export interface SiteContent {
 
   houseIntroEyebrow?: LocaleString
   houseIntroParagraph?: LocaleText
+  houseIntroMedia?: SiteMedia
   stats?: Stat[]
 
   massagesEyebrow?: LocaleString

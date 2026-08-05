@@ -797,6 +797,12 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
                 2. Apresentação da Casa & Estatísticas
               </h3>
 
+              <MediaUploader
+                label="Foto / Vídeo de Apoio da Seção A Casa (Ao lado do texto de apresentação)"
+                media={content.houseIntroMedia}
+                onChange={(media) => updateField('houseIntroMedia', media)}
+              />
+
               {renderLocaleInput('Selo da Introdução', 'houseIntroEyebrow', content.houseIntroEyebrow, (v) =>
                 updateField('houseIntroEyebrow', v)
               )}
