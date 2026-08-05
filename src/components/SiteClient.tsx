@@ -382,26 +382,27 @@ export default function SiteClient({ content: initialContent }: { content: SiteC
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    // 1. Sync from localStorage if available
-    try {
-      const cached = localStorage.getItem('maison_solene_content_backup')
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (parsed && typeof parsed === 'object') {
-          setContent((prev) => ({ ...prev, ...parsed }))
-        }
-      }
-    } catch {}
-
-    // 2. Sync from server API
+    // 1. Fetch server API first
     fetch('/api/content')
       .then((res) => res.json())
       .then((data) => {
-        if (data && typeof data === 'object') {
+        if (data && typeof data === 'object' && Object.keys(data).length > 0) {
           setContent((prev) => ({ ...prev, ...data }))
         }
       })
       .catch(() => {})
+      .finally(() => {
+        // 2. Prioritize localStorage backup saved by Admin Panel
+        try {
+          const cached = localStorage.getItem('maison_solene_content_backup')
+          if (cached) {
+            const parsed = JSON.parse(cached)
+            if (parsed && typeof parsed === 'object') {
+              setContent((prev) => ({ ...prev, ...parsed }))
+            }
+          }
+        } catch {}
+      })
   }, [])
 
   const html = useMemo(() => renderSiteHtml(content), [content])
