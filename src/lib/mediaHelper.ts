@@ -16,7 +16,7 @@ export function parseMediaUrl(rawUrl?: string): MediaUrlInfo {
     return {
       type: 'vimeo',
       videoId,
-      embedUrl: `https://player.vimeo.com/video/${videoId}?autoplay=1&muted=1&loop=1&autopause=0&background=1`,
+      embedUrl: `https://player.vimeo.com/video/${videoId}?autoplay=1&muted=1&loop=1&autopause=0&background=1&quality=1080p&title=0&byline=0&portrait=0`,
     }
   }
 
@@ -27,7 +27,7 @@ export function parseMediaUrl(rawUrl?: string): MediaUrlInfo {
     return {
       type: 'youtube',
       videoId,
-      embedUrl: `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=0`,
+      embedUrl: `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=0&showinfo=0&rel=0`,
     }
   }
 

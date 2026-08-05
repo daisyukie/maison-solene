@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { renderSiteHtml } from '@/lib/renderSite'
 import type { SiteContent } from '@/sanity/lib/types'
@@ -377,8 +377,33 @@ class Site {
   }
 }
 
-export default function SiteClient({ content }: { content: SiteContent }) {
+export default function SiteClient({ content: initialContent }: { content: SiteContent }) {
+  const [content, setContent] = useState<SiteContent>(initialContent)
   const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    // 1. Sync from localStorage if available
+    try {
+      const cached = localStorage.getItem('maison_solene_content_backup')
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (parsed && typeof parsed === 'object') {
+          setContent((prev) => ({ ...prev, ...parsed }))
+        }
+      }
+    } catch {}
+
+    // 2. Sync from server API
+    fetch('/api/content')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && typeof data === 'object') {
+          setContent((prev) => ({ ...prev, ...data }))
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   const html = useMemo(() => renderSiteHtml(content), [content])
 
   useEffect(() => {
@@ -389,8 +414,6 @@ export default function SiteClient({ content }: { content: SiteContent }) {
   }, [html])
 
   return (
-    // Safe: renderSiteHtml HTML-escapes every interpolated CMS field itself
-    // (see src/lib/renderSite.ts) — this isn't raw untrusted markup.
     <div
       ref={rootRef}
       data-site-root=""

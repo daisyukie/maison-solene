@@ -184,17 +184,43 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
         }}
       >
         {mediaInfo.type === 'vimeo' ? (
-          <iframe
-            src={mediaInfo.embedUrl}
-            style={{ width: '100%', height: '100%', border: 'none' }}
-            allow="autoplay; fullscreen"
-          />
+          <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+            <iframe
+              src={mediaInfo.embedUrl}
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                width: '180%',
+                height: '180%',
+                minWidth: '100%',
+                minHeight: '100%',
+                transform: 'translate(-50%, -50%)',
+                border: 'none',
+                pointerEvents: 'none',
+              }}
+              allow="autoplay; fullscreen"
+            />
+          </div>
         ) : mediaInfo.type === 'youtube' ? (
-          <iframe
-            src={mediaInfo.embedUrl}
-            style={{ width: '100%', height: '100%', border: 'none' }}
-            allow="autoplay; encrypted-media"
-          />
+          <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+            <iframe
+              src={mediaInfo.embedUrl}
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                width: '180%',
+                height: '180%',
+                minWidth: '100%',
+                minHeight: '100%',
+                transform: 'translate(-50%, -50%)',
+                border: 'none',
+                pointerEvents: 'none',
+              }}
+              allow="autoplay; encrypted-media"
+            />
+          </div>
         ) : mediaInfo.type === 'video' ? (
           <video src={mediaInfo.url} controls style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         ) : mediaInfo.type === 'image' ? (
