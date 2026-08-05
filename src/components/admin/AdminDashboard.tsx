@@ -9,7 +9,7 @@ interface AdminDashboardProps {
   onLogout: () => void
 }
 
-type TabType = 'brand' | 'home' | 'house' | 'rates' | 'booking'
+type TabType = 'brand' | 'home' | 'house' | 'rates'
 
 interface ToastState {
   message: string
@@ -63,6 +63,18 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
     })
   }
 
+  // Update gallery array item (homeGallery / houseGallery)
+  const updateGalleryItem = (galleryKey: 'homeGallery' | 'houseGallery', index: number, media: SiteMedia) => {
+    setContent((prev) => {
+      const list = [...(prev[galleryKey] || [])]
+      while (list.length <= index) {
+        list.push({ hint: `foto ${list.length + 1}` })
+      }
+      list[index] = media
+      return { ...prev, [galleryKey]: list }
+    })
+  }
+
   // Single field auto-translate
   const handleTranslateField = async (fieldKey: string, ptText: string, onSuccess: (enText: string) => void) => {
     if (!ptText || !ptText.trim()) {
@@ -94,7 +106,6 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
   const handleSave = async () => {
     setSaving(true)
 
-    // Calculate payload size
     const jsonString = JSON.stringify(content)
     const payloadBytes = new Blob([jsonString]).size
     const payloadMB = payloadBytes / (1024 * 1024)
@@ -106,7 +117,6 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
     }
 
     try {
-      // Save client backup
       try {
         localStorage.setItem(LOCAL_STORAGE_KEY, jsonString)
       } catch {}
@@ -163,59 +173,42 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
     reader.readAsText(file)
   }
 
-  // Auto translate all empty EN fields across content
+  // Auto Translate ALL fields
   const handleTranslateAll = async () => {
-    if (!confirm('Deseja preencher automaticamente todos os campos em Inglês que estiverem em branco?')) return
-
     setTranslatingAll(true)
-    showToast('Iniciando tradução automática do site...', 'info')
+    showToast('Traduzindo todos os textos do site para Inglês... Aguarde alguns instantes.', 'info')
+
+    const autoTrans = async (loc?: LocaleString): Promise<LocaleString> => {
+      const ptText = loc?.pt || ''
+      if (!ptText.trim()) return loc || {}
+      try {
+        const res = await fetch('/api/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: ptText }),
+        })
+        const data = await res.json()
+        return { pt: ptText, en: data.translatedText || loc?.en || ptText }
+      } catch {
+        return loc || { pt: ptText, en: ptText }
+      }
+    }
 
     try {
-      const newContent = JSON.parse(JSON.stringify(content)) as SiteContent
-
-      const autoTrans = async (loc?: LocaleString): Promise<LocaleString | undefined> => {
-        if (!loc || !loc.pt) return loc
-        if (!loc.en || !loc.en.trim()) {
-          try {
-            const res = await fetch('/api/translate', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ text: loc.pt }),
-            })
-            const data = await res.json()
-            if (data.translatedText) {
-              return { pt: loc.pt, en: data.translatedText }
-            }
-          } catch {}
-        }
-        return loc
-      }
+      const newContent = { ...content }
 
       newContent.addressNote = await autoTrans(newContent.addressNote)
       newContent.hoursLine = await autoTrans(newContent.hoursLine)
       newContent.hoursNote = await autoTrans(newContent.hoursNote)
       newContent.footerTagline = await autoTrans(newContent.footerTagline)
       newContent.heroEyebrow = await autoTrans(newContent.heroEyebrow)
-
-      if (newContent.heroTitlePt && (!newContent.heroTitleEn || !newContent.heroTitleEn.trim())) {
-        try {
-          const res = await fetch('/api/translate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: newContent.heroTitlePt }),
-          })
-          const data = await res.json()
-          if (data.translatedText) newContent.heroTitleEn = data.translatedText
-        } catch {}
-      }
-
       newContent.heroSubtitle = await autoTrans(newContent.heroSubtitle)
       newContent.houseIntroEyebrow = await autoTrans(newContent.houseIntroEyebrow)
       newContent.houseIntroParagraph = await autoTrans(newContent.houseIntroParagraph)
 
       if (newContent.stats) {
-        for (const st of newContent.stats) {
-          st.label = await autoTrans(st.label)
+        for (const s of newContent.stats) {
+          s.label = await autoTrans(s.label)
         }
       }
 
@@ -268,7 +261,6 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
       newContent.ratesTitle = await autoTrans(newContent.ratesTitle)
       newContent.eveningRitualQuote = await autoTrans(newContent.eveningRitualQuote)
       newContent.eveningRitualLabel = await autoTrans(newContent.eveningRitualLabel)
-      newContent.additionsEyebrow = await autoTrans(newContent.additionsEyebrow)
 
       if (newContent.additions) {
         for (const a of newContent.additions) {
@@ -288,24 +280,24 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
       newContent.bookingConfirmation = await autoTrans(newContent.bookingConfirmation)
 
       setContent(newContent)
-      showToast('✨ Tradução concluída! Clique em "Salvar Alterações" para publicar.', 'success')
+      showToast('✨ Todo o site foi traduzido para o Inglês com sucesso!', 'success')
     } catch {
-      showToast('Erro durante a tradução automática', 'error')
+      showToast('Erro ao traduzir o site completo', 'error')
     } finally {
       setTranslatingAll(false)
     }
   }
 
-  // Helper renderer for dual-language inputs (PT / EN)
+  // Helper for dual language input block
   const renderLocaleInput = (
     label: string,
-    fieldKey: string,
-    loc: LocaleString | undefined,
+    fieldKey: keyof SiteContent,
+    locObj: LocaleString | undefined,
     onChangeLoc: (newLoc: LocaleString) => void,
     isTextArea = false
   ) => {
-    const pt = loc?.pt || ''
-    const en = loc?.en || ''
+    const pt = locObj?.pt || ''
+    const en = locObj?.en || ''
 
     return (
       <div
@@ -323,7 +315,7 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
             type="button"
             disabled={translatingField === fieldKey}
             onClick={() =>
-              handleTranslateField(fieldKey, pt, (translated) => {
+              handleTranslateField(fieldKey as string, pt, (translated) => {
                 onChangeLoc({ pt, en: translated })
               })
             }
@@ -359,7 +351,6 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
                   padding: '8px 12px',
                   color: '#EDE6DD',
                   fontSize: 13,
-                  outline: 'none',
                   boxSizing: 'border-box',
                 }}
               />
@@ -376,7 +367,6 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
                   padding: '8px 12px',
                   color: '#EDE6DD',
                   fontSize: 13,
-                  outline: 'none',
                   boxSizing: 'border-box',
                 }}
               />
@@ -384,8 +374,8 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
           </div>
 
           <div>
-            <span style={{ fontSize: 11, color: '#9A8F88', display: 'block', marginBottom: 4 }}>
-              🇬🇧 English
+            <span style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>
+              🇬🇧 Inglês
             </span>
             {isTextArea ? (
               <textarea
@@ -400,7 +390,6 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
                   padding: '8px 12px',
                   color: '#EDE6DD',
                   fontSize: 13,
-                  outline: 'none',
                   boxSizing: 'border-box',
                 }}
               />
@@ -417,7 +406,6 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
                   padding: '8px 12px',
                   color: '#EDE6DD',
                   fontSize: 13,
-                  outline: 'none',
                   boxSizing: 'border-box',
                 }}
               />
@@ -479,31 +467,24 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
           boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <h1
-            style={{
-              fontSize: 18,
-              fontWeight: 500,
-              color: '#C9A25B',
-              letterSpacing: '0.1em',
-              margin: 0,
-              textTransform: 'uppercase',
-            }}
-          >
-            Maison Solène · Admin
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h1 style={{ fontFamily: 'serif', fontSize: 20, margin: 0, color: '#C9A25B', fontWeight: 400 }}>
+            MAISON SOLÈNE
           </h1>
+          <span style={{ fontSize: 11, background: 'rgba(201,162,91,.15)', color: '#C9A25B', padding: '2px 8px', borderRadius: 4 }}>
+            PAINEL ADMIN
+          </span>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={handleExportBackup}
-            title="Baixar cópia de segurança em arquivo JSON"
             style={{
-              background: 'transparent',
+              background: '#181214',
               border: '1px solid rgba(201,162,91,.3)',
               color: '#C9A25B',
-              padding: '7px 12px',
+              padding: '8px 12px',
               borderRadius: 6,
               fontSize: 12,
               cursor: 'pointer',
@@ -513,16 +494,14 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
           </button>
 
           <label
-            title="Restaurar um arquivo de backup JSON salvo no computador"
             style={{
-              background: 'transparent',
+              background: '#181214',
               border: '1px solid rgba(201,162,91,.3)',
               color: '#C9A25B',
-              padding: '7px 12px',
+              padding: '8px 12px',
               borderRadius: 6,
               fontSize: 12,
               cursor: 'pointer',
-              display: 'inline-block',
             }}
           >
             📤 Restaurar
@@ -534,16 +513,17 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
             disabled={translatingAll}
             onClick={handleTranslateAll}
             style={{
-              background: 'rgba(201,162,91,.15)',
-              border: '1px solid rgba(201,162,91,.4)',
-              color: '#C9A25B',
+              background: 'linear-gradient(135deg, #7C5C26 0%, #C9A25B 100%)',
+              color: '#0B0809',
+              border: 'none',
               padding: '8px 14px',
               borderRadius: 6,
-              fontSize: 13,
+              fontSize: 12,
+              fontWeight: 700,
               cursor: 'pointer',
             }}
           >
-            {translatingAll ? 'Traduzindo site...' : '✨ Traduzir Tudo (PT → EN)'}
+            {translatingAll ? 'Traduzindo Tudo...' : '✨ Traduzir Tudo (PT → EN)'}
           </button>
 
           <a
@@ -612,10 +592,9 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
         >
           {[
             { id: 'brand', label: '📍 Marca & Contato' },
-            { id: 'home', label: '🏠 Início' },
+            { id: 'home', label: '🏠 Página de Início' },
             { id: 'house', label: '🚪 A Casa' },
-            { id: 'rates', label: '💳 Valores' },
-            { id: 'booking', label: '📅 Agendamento' },
+            { id: 'rates', label: '💳 Valores & Agendar' },
           ].map((tab) => {
             const isActive = activeTab === tab.id
             return (
@@ -627,7 +606,7 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
                   background: isActive ? '#C9A25B' : 'transparent',
                   color: isActive ? '#0B0809' : '#EDE6DD',
                   border: 'none',
-                  padding: '10px 18px',
+                  padding: '10px 20px',
                   borderRadius: '6px 6px 0 0',
                   fontSize: 14,
                   fontWeight: isActive ? 700 : 400,
@@ -684,7 +663,9 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
                   }}
                 />
               </div>
+            </div>
 
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
               <div>
                 <label style={{ fontSize: 12, color: '#C9A25B', display: 'block', marginBottom: 6 }}>E-mail de Contato</label>
                 <input
@@ -705,7 +686,7 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
               </div>
 
               <div>
-                <label style={{ fontSize: 12, color: '#C9A25B', display: 'block', marginBottom: 6 }}>Endereço (rua e número)</label>
+                <label style={{ fontSize: 12, color: '#C9A25B', display: 'block', marginBottom: 6 }}>Endereço (Linha Principal)</label>
                 <input
                   type="text"
                   value={content.addressLine || ''}
@@ -744,123 +725,39 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
           <div>
             <h2 style={{ fontSize: 20, color: '#C9A25B', marginBottom: 20, fontWeight: 400 }}>Página de Início</h2>
 
-            <MediaUploader
-              label="Foto / Vídeo de Abertura (Hero)"
-              media={content.heroMedia}
-              onChange={(media) => updateField('heroMedia', media)}
-            />
+            {/* HERO SECTION */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                1. Abertura do Site (Hero)
+              </h3>
 
-            {renderLocaleInput('Selo acima do título (Hero Eyebrow)', 'heroEyebrow', content.heroEyebrow, (v) =>
-              updateField('heroEyebrow', v)
-            )}
+              <MediaUploader
+                label="Foto / Vídeo da Abertura Principal (Hero)"
+                media={content.heroMedia}
+                onChange={(media) => updateField('heroMedia', media)}
+              />
 
-            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.15)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-              <label style={{ color: '#EDE6DD', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 10 }}>
-                Título Principal da Abertura (pode usar &lt;br /&gt; para quebrar linha)
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                <div>
-                  <span style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>🇵🇹 Português</span>
-                  <textarea
-                    value={content.heroTitlePt || ''}
-                    onChange={(e) => updateField('heroTitlePt', e.target.value)}
-                    rows={2}
-                    style={{
-                      width: '100%',
-                      background: '#0B0809',
-                      border: '1px solid rgba(201,162,91,.2)',
-                      borderRadius: 4,
-                      padding: '8px 12px',
-                      color: '#EDE6DD',
-                      fontSize: 13,
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-                <div>
-                  <span style={{ fontSize: 11, color: '#9A8F88', display: 'block', marginBottom: 4 }}>🇬🇧 English</span>
-                  <textarea
-                    value={content.heroTitleEn || ''}
-                    onChange={(e) => updateField('heroTitleEn', e.target.value)}
-                    rows={2}
-                    style={{
-                      width: '100%',
-                      background: '#0B0809',
-                      border: '1px solid rgba(201,162,91,.2)',
-                      borderRadius: 4,
-                      padding: '8px 12px',
-                      color: '#EDE6DD',
-                      fontSize: 13,
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
+              {renderLocaleInput('Selo acima do título (Hero Eyebrow)', 'heroEyebrow', content.heroEyebrow, (v) =>
+                updateField('heroEyebrow', v)
+              )}
 
-            {renderLocaleInput('Subtítulo da Abertura', 'heroSubtitle', content.heroSubtitle, (v) =>
-              updateField('heroSubtitle', v),
-              true
-            )}
-
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Seção 01 — A Casa (Introdução)</h3>
-            {renderLocaleInput('Selo da Introdução', 'houseIntroEyebrow', content.houseIntroEyebrow, (v) =>
-              updateField('houseIntroEyebrow', v)
-            )}
-            {renderLocaleInput('Texto da Introdução', 'houseIntroParagraph', content.houseIntroParagraph, (v) =>
-              updateField('houseIntroParagraph', v),
-              true
-            )}
-
-            {/* Stats Array */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 12 }}>
-              <h4 style={{ fontSize: 14, color: '#EDE6DD', margin: 0 }}>Estatísticas / Números</h4>
-              <button
-                type="button"
-                onClick={() => {
-                  const arr = [...(content.stats || [])]
-                  arr.push({ number: '01', label: { pt: 'Nova estatística', en: 'New stat' } })
-                  updateField('stats', arr)
-                }}
-                style={{ background: 'rgba(201,162,91,.15)', border: '1px solid rgba(201,162,91,.4)', color: '#C9A25B', fontSize: 12, padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}
-              >
-                + Adicionar Stat
-              </button>
-            </div>
-
-            {(content.stats || []).map((st, idx) => (
-              <div key={idx} style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.15)', borderRadius: 8, padding: 16, marginBottom: 12, position: 'relative' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <span style={{ fontSize: 12, color: '#C9A25B' }}>Stat #{idx + 1}</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const arr = [...(content.stats || [])]
-                      arr.splice(idx, 1)
-                      updateField('stats', arr)
-                    }}
-                    style={{ background: 'transparent', border: 'none', color: '#E06B78', fontSize: 12, cursor: 'pointer' }}
-                  >
-                    Excluir
-                  </button>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 14, alignItems: 'center' }}>
+              <div style={{ background: '#0B0809', border: '1px solid rgba(201,162,91,.15)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+                <label style={{ color: '#EDE6DD', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 10 }}>
+                  Título Principal da Abertura (suporta &lt;br /&gt; para quebrar linha)
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div>
-                    <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Número</label>
+                    <span style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>🇵🇹 Português</span>
                     <input
                       type="text"
-                      value={st.number || ''}
-                      onChange={(e) => {
-                        const newStats = [...(content.stats || [])]
-                        newStats[idx] = { ...newStats[idx], number: e.target.value }
-                        updateField('stats', newStats)
-                      }}
+                      value={content.heroTitlePt || ''}
+                      onChange={(e) => updateField('heroTitlePt', e.target.value)}
                       style={{
                         width: '100%',
-                        background: '#0B0809',
+                        background: '#130D0F',
                         border: '1px solid rgba(201,162,91,.2)',
                         borderRadius: 4,
-                        padding: '6px 10px',
+                        padding: '8px 12px',
                         color: '#EDE6DD',
                         fontSize: 13,
                         boxSizing: 'border-box',
@@ -868,531 +765,830 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
                     />
                   </div>
                   <div>
-                    {renderLocaleInput(`Legenda Stat #${idx + 1}`, `stat_${idx}`, st.label, (newLoc) => {
-                      const newStats = [...(content.stats || [])]
-                      newStats[idx] = { ...newStats[idx], label: newLoc }
-                      updateField('stats', newStats)
-                    })}
+                    <span style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>🇬🇧 Inglês</span>
+                    <input
+                      type="text"
+                      value={content.heroTitleEn || ''}
+                      onChange={(e) => updateField('heroTitleEn', e.target.value)}
+                      style={{
+                        width: '100%',
+                        background: '#130D0F',
+                        border: '1px solid rgba(201,162,91,.2)',
+                        borderRadius: 4,
+                        padding: '8px 12px',
+                        color: '#EDE6DD',
+                        fontSize: 13,
+                        boxSizing: 'border-box',
+                      }}
+                    />
                   </div>
                 </div>
               </div>
-            ))}
 
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Seção 02 — Massagens</h3>
-            {renderLocaleInput('Selo das Massagens', 'massagesEyebrow', content.massagesEyebrow, (v) =>
-              updateField('massagesEyebrow', v)
-            )}
-
-            {/* Massagens Array */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h4 style={{ fontSize: 14, color: '#EDE6DD', margin: 0 }}>Lista de Massagens</h4>
-              <button
-                type="button"
-                onClick={() => {
-                  const arr = [...(content.massages || [])]
-                  arr.push({
-                    title: { pt: 'Nova Massagem', en: 'New Massage' },
-                    homeDescription: { pt: 'Descrição curta...', en: 'Short description...' },
-                    rateDescription: { pt: 'Descrição de valores...', en: 'Rate description...' },
-                    duration1: "60'", duration2: "90'", price1: '€100', price2: '€150',
-                  })
-                  updateField('massages', arr)
-                }}
-                style={{ background: 'rgba(201,162,91,.15)', border: '1px solid rgba(201,162,91,.4)', color: '#C9A25B', fontSize: 12, padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}
-              >
-                + Adicionar Massagem
-              </button>
+              {renderLocaleInput('Subtítulo da Abertura (Hero Subtitle)', 'heroSubtitle', content.heroSubtitle, (v) =>
+                updateField('heroSubtitle', v),
+                true
+              )}
             </div>
 
-            {(content.massages || []).map((msg, idx) => (
-              <div
-                key={idx}
-                style={{
-                  background: '#130D0F',
-                  border: '1px solid rgba(201,162,91,.25)',
-                  borderRadius: 8,
-                  padding: 20,
-                  marginBottom: 20,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <h4 style={{ color: '#C9A25B', margin: 0, fontSize: 15 }}>
-                    Massagem #{idx + 1}: {msg.title?.pt || ''}
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const arr = [...(content.massages || [])]
-                      arr.splice(idx, 1)
-                      updateField('massages', arr)
-                    }}
-                    style={{ background: 'transparent', border: '1px solid rgba(176,36,58,.4)', color: '#E06B78', fontSize: 12, padding: '4px 8px', borderRadius: 4, cursor: 'pointer' }}
-                  >
-                    Excluir Massagem
-                  </button>
-                </div>
+            {/* INTRO & STATS */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                2. Apresentação da Casa & Estatísticas
+              </h3>
 
-                {renderLocaleInput('Título da Massagem', `msg_title_${idx}`, msg.title, (newLoc) => {
-                  const arr = [...(content.massages || [])]
-                  arr[idx] = { ...arr[idx], title: newLoc }
-                  updateField('massages', arr)
-                })}
+              {renderLocaleInput('Selo da Introdução', 'houseIntroEyebrow', content.houseIntroEyebrow, (v) =>
+                updateField('houseIntroEyebrow', v)
+              )}
 
-                {renderLocaleInput('Descrição (Página Inicial)', `msg_homedesc_${idx}`, msg.homeDescription, (newLoc) => {
-                  const arr = [...(content.massages || [])]
-                  arr[idx] = { ...arr[idx], homeDescription: newLoc }
-                  updateField('massages', arr)
-                }, true)}
+              {renderLocaleInput('Parágrafo Principal de Apresentação', 'houseIntroParagraph', content.houseIntroParagraph, (v) =>
+                updateField('houseIntroParagraph', v),
+                true
+              )}
 
-                {renderLocaleInput('Descrição (Tabela de Valores)', `msg_ratedesc_${idx}`, msg.rateDescription, (newLoc) => {
-                  const arr = [...(content.massages || [])]
-                  arr[idx] = { ...arr[idx], rateDescription: newLoc }
-                  updateField('massages', arr)
-                }, true)}
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
-                  <div>
-                    <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Duração 1 (ex: 60')</label>
-                    <input
-                      type="text"
-                      value={msg.duration1 || ''}
-                      onChange={(e) => {
-                        const arr = [...(content.massages || [])]
-                        arr[idx] = { ...arr[idx], duration1: e.target.value }
-                        updateField('massages', arr)
-                      }}
-                      style={{ width: '100%', background: '#0B0809', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13, boxSizing: 'border-box' }}
-                    />
+              <div style={{ borderTop: '1px dashed rgba(201,162,91,.2)', paddingTop: 16, marginTop: 16 }}>
+                <h4 style={{ color: '#EDE6DD', fontSize: 14, margin: '0 0 12px 0' }}>Estatísticas em Destaque (3 itens)</h4>
+                {(content.stats || []).map((st, idx) => (
+                  <div key={idx} style={{ background: '#0B0809', border: '1px solid rgba(201,162,91,.15)', borderRadius: 6, padding: 12, marginBottom: 10 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: 12 }}>
+                      <div>
+                        <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Número</label>
+                        <input
+                          type="text"
+                          value={st.number || ''}
+                          onChange={(e) => {
+                            const newStats = [...(content.stats || [])]
+                            newStats[idx] = { ...newStats[idx], number: e.target.value }
+                            updateField('stats', newStats)
+                          }}
+                          style={{
+                            width: '100%',
+                            background: '#130D0F',
+                            border: '1px solid rgba(201,162,91,.2)',
+                            borderRadius: 4,
+                            padding: '6px 10px',
+                            color: '#EDE6DD',
+                            fontSize: 13,
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Texto da Estatística (PT / EN)</label>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          <input
+                            type="text"
+                            placeholder="Português"
+                            value={st.label?.pt || ''}
+                            onChange={(e) => {
+                              const newStats = [...(content.stats || [])]
+                              newStats[idx] = {
+                                ...newStats[idx],
+                                label: { ...newStats[idx].label, pt: e.target.value },
+                              }
+                              updateField('stats', newStats)
+                            }}
+                            style={{
+                              width: '100%',
+                              background: '#130D0F',
+                              border: '1px solid rgba(201,162,91,.2)',
+                              borderRadius: 4,
+                              padding: '6px 10px',
+                              color: '#EDE6DD',
+                              fontSize: 13,
+                            }}
+                          />
+                          <input
+                            type="text"
+                            placeholder="Inglês"
+                            value={st.label?.en || ''}
+                            onChange={(e) => {
+                              const newStats = [...(content.stats || [])]
+                              newStats[idx] = {
+                                ...newStats[idx],
+                                label: { ...newStats[idx].label, en: e.target.value },
+                              }
+                              updateField('stats', newStats)
+                            }}
+                            style={{
+                              width: '100%',
+                              background: '#130D0F',
+                              border: '1px solid rgba(201,162,91,.2)',
+                              borderRadius: 4,
+                              padding: '6px 10px',
+                              color: '#EDE6DD',
+                              fontSize: 13,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Preço 1 (ex: €120)</label>
-                    <input
-                      type="text"
-                      value={msg.price1 || ''}
-                      onChange={(e) => {
-                        const arr = [...(content.massages || [])]
-                        arr[idx] = { ...arr[idx], price1: e.target.value }
-                        updateField('massages', arr)
-                      }}
-                      style={{ width: '100%', background: '#0B0809', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13, boxSizing: 'border-box' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Duração 2 (ex: 90')</label>
-                    <input
-                      type="text"
-                      value={msg.duration2 || ''}
-                      onChange={(e) => {
-                        const arr = [...(content.massages || [])]
-                        arr[idx] = { ...arr[idx], duration2: e.target.value }
-                        updateField('massages', arr)
-                      }}
-                      style={{ width: '100%', background: '#0B0809', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13, boxSizing: 'border-box' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Preço 2 (ex: €165)</label>
-                    <input
-                      type="text"
-                      value={msg.price2 || ''}
-                      onChange={(e) => {
-                        const arr = [...(content.massages || [])]
-                        arr[idx] = { ...arr[idx], price2: e.target.value }
-                        updateField('massages', arr)
-                      }}
-                      style={{ width: '100%', background: '#0B0809', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13, boxSizing: 'border-box' }}
-                    />
-                  </div>
-                </div>
-
-                <MediaUploader
-                  label={`Mídia da Massagem #${idx + 1}`}
-                  media={msg.media}
-                  onChange={(newMedia) => {
-                    const arr = [...(content.massages || [])]
-                    arr[idx] = { ...arr[idx], media: newMedia }
-                    updateField('massages', arr)
-                  }}
-                />
+                ))}
               </div>
-            ))}
+            </div>
 
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Faixa de Vídeo Central</h3>
-            {renderLocaleInput('Frase em destaque na Faixa de Vídeo', 'videoBannerQuote', content.videoBannerQuote, (v) =>
-              updateField('videoBannerQuote', v),
-              true
-            )}
-            {renderLocaleInput('Legenda pequena (ex: Filme da casa · 40 segundos)', 'videoBannerCaption', content.videoBannerCaption, (v) =>
-              updateField('videoBannerCaption', v)
-            )}
-            <MediaUploader
-              label="Mídia da Faixa de Vídeo"
-              media={content.videoBannerMedia}
-              onChange={(media) => updateField('videoBannerMedia', media)}
-            />
+            {/* MASSAGES LISTING & MEDIA */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                3. As 4 Massagens (Títulos, Descrições & Mídias)
+              </h3>
 
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Galeria da Página Inicial</h3>
-            {(content.homeGallery || [{}, {}, {}]).slice(0, 3).map((item, idx) => (
+              {renderLocaleInput('Selo da Seção de Massagens', 'massagesEyebrow', content.massagesEyebrow, (v) =>
+                updateField('massagesEyebrow', v)
+              )}
+
+              {(content.massages || []).map((m, idx) => (
+                <div key={idx} style={{ background: '#0B0809', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+                  <h4 style={{ color: '#C9A25B', margin: '0 0 12px 0', fontSize: 15 }}>
+                    Massagem {idx + 1}: {m.title?.pt || 'Sem Título'}
+                  </h4>
+
+                  <MediaUploader
+                    label={`Foto / Vídeo da Massagem ${idx + 1}`}
+                    media={m.media}
+                    onChange={(updatedMedia) => {
+                      const newMassages = [...(content.massages || [])]
+                      newMassages[idx] = { ...newMassages[idx], media: updatedMedia }
+                      updateField('massages', newMassages)
+                    }}
+                  />
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Nome em Português</label>
+                      <input
+                        type="text"
+                        value={m.title?.pt || ''}
+                        onChange={(e) => {
+                          const newMassages = [...(content.massages || [])]
+                          newMassages[idx] = { ...newMassages[idx], title: { ...newMassages[idx].title, pt: e.target.value } }
+                          updateField('massages', newMassages)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Nome em Inglês</label>
+                      <input
+                        type="text"
+                        value={m.title?.en || ''}
+                        onChange={(e) => {
+                          const newMassages = [...(content.massages || [])]
+                          newMassages[idx] = { ...newMassages[idx], title: { ...newMassages[idx].title, en: e.target.value } }
+                          updateField('massages', newMassages)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Descrição na Home (Português)</label>
+                      <textarea
+                        rows={2}
+                        value={m.homeDescription?.pt || ''}
+                        onChange={(e) => {
+                          const newMassages = [...(content.massages || [])]
+                          newMassages[idx] = { ...newMassages[idx], homeDescription: { ...newMassages[idx].homeDescription, pt: e.target.value } }
+                          updateField('massages', newMassages)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Descrição na Home (Inglês)</label>
+                      <textarea
+                        rows={2}
+                        value={m.homeDescription?.en || ''}
+                        onChange={(e) => {
+                          const newMassages = [...(content.massages || [])]
+                          newMassages[idx] = { ...newMassages[idx], homeDescription: { ...newMassages[idx].homeDescription, en: e.target.value } }
+                          updateField('massages', newMassages)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* VIDEO BANNER SECTION */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                4. Banner de Vídeo em Destaque no Início
+              </h3>
+
               <MediaUploader
-                key={idx}
-                label={`Foto / Vídeo #${idx + 1} da Galeria`}
-                media={item}
-                onChange={(newMedia) => {
-                  const arr = [...(content.homeGallery || [])]
-                  arr[idx] = newMedia
-                  updateField('homeGallery', arr)
-                }}
+                label="Vídeo / Foto do Banner Central do Início"
+                media={content.videoBannerMedia}
+                onChange={(media) => updateField('videoBannerMedia', media)}
               />
-            ))}
+
+              {renderLocaleInput('Frase sobre o Vídeo (Quote)', 'videoBannerQuote', content.videoBannerQuote, (v) =>
+                updateField('videoBannerQuote', v)
+              )}
+
+              {renderLocaleInput('Legenda do Vídeo (ex: Filme da casa · 40 segundos)', 'videoBannerCaption', content.videoBannerCaption, (v) =>
+                updateField('videoBannerCaption', v)
+              )}
+            </div>
+
+            {/* HOME GALLERY */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                5. Galeria de Fotos / Vídeos da Página de Início (3 mídias)
+              </h3>
+
+              {[0, 1, 2].map((gIdx) => (
+                <MediaUploader
+                  key={gIdx}
+                  label={`Galeria do Início - Foto / Vídeo ${gIdx + 1}`}
+                  media={content.homeGallery?.[gIdx]}
+                  onChange={(updatedMedia) => updateGalleryItem('homeGallery', gIdx, updatedMedia)}
+                />
+              ))}
+            </div>
           </div>
         )}
 
         {/* TAB 3: A CASA */}
         {activeTab === 'house' && (
           <div>
-            <h2 style={{ fontSize: 20, color: '#C9A25B', marginBottom: 20, fontWeight: 400 }}>Página "A Casa"</h2>
+            <h2 style={{ fontSize: 20, color: '#C9A25B', marginBottom: 20, fontWeight: 400 }}>A Casa</h2>
 
-            <MediaUploader
-              label="Mídia de Abertura (A Casa)"
-              media={content.houseHeroMedia}
-              onChange={(media) => updateField('houseHeroMedia', media)}
-            />
+            {/* HOUSE HERO */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                1. Abertura da Seção "A Casa"
+              </h3>
 
-            {renderLocaleInput('Selo de Abertura', 'houseHeroEyebrow', content.houseHeroEyebrow, (v) =>
-              updateField('houseHeroEyebrow', v)
-            )}
-            {renderLocaleInput('Título Principal', 'houseHeroTitle', content.houseHeroTitle, (v) =>
-              updateField('houseHeroTitle', v)
-            )}
-            {renderLocaleInput('Subtítulo', 'houseHeroSubtitle', content.houseHeroSubtitle, (v) =>
-              updateField('houseHeroSubtitle', v),
-              true
-            )}
-
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Seção 01 — O Percurso (Timeline)</h3>
-            {renderLocaleInput('Selo do Percurso', 'timelineEyebrow', content.timelineEyebrow, (v) =>
-              updateField('timelineEyebrow', v)
-            )}
-            {renderLocaleInput('Nota à Direita do Percurso', 'timelineNote', content.timelineNote, (v) =>
-              updateField('timelineNote', v)
-            )}
-
-            {/* Timeline Steps Array */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h4 style={{ fontSize: 14, color: '#EDE6DD', margin: 0 }}>Etapas da Timeline</h4>
-              <button
-                type="button"
-                onClick={() => {
-                  const arr = [...(content.timelineSteps || [])]
-                  arr.push({
-                    kicker: { pt: 'Nova etapa', en: 'New step' },
-                    title: { pt: 'Título', en: 'Title' },
-                    body: { pt: 'Descrição...', en: 'Description...' },
-                  })
-                  updateField('timelineSteps', arr)
-                }}
-                style={{ background: 'rgba(201,162,91,.15)', border: '1px solid rgba(201,162,91,.4)', color: '#C9A25B', fontSize: 12, padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}
-              >
-                + Adicionar Etapa
-              </button>
-            </div>
-
-            {(content.timelineSteps || []).map((step, idx) => (
-              <div key={idx} style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.25)', borderRadius: 8, padding: 20, marginBottom: 20 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <h4 style={{ color: '#C9A25B', margin: 0, fontSize: 15 }}>Etapa #{idx + 1}: {step.title?.pt || ''}</h4>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const arr = [...(content.timelineSteps || [])]
-                      arr.splice(idx, 1)
-                      updateField('timelineSteps', arr)
-                    }}
-                    style={{ background: 'transparent', border: '1px solid rgba(176,36,58,.4)', color: '#E06B78', fontSize: 12, padding: '4px 8px', borderRadius: 4, cursor: 'pointer' }}
-                  >
-                    Excluir Etapa
-                  </button>
-                </div>
-
-                {renderLocaleInput('Kicker / Horário (ex: 23h05 · a rua)', `ts_kicker_${idx}`, step.kicker, (newLoc) => {
-                  const arr = [...(content.timelineSteps || [])]
-                  arr[idx] = { ...arr[idx], kicker: newLoc }
-                  updateField('timelineSteps', arr)
-                })}
-
-                {renderLocaleInput('Título da Etapa', `ts_title_${idx}`, step.title, (newLoc) => {
-                  const arr = [...(content.timelineSteps || [])]
-                  arr[idx] = { ...arr[idx], title: newLoc }
-                  updateField('timelineSteps', arr)
-                })}
-
-                {renderLocaleInput('Texto Descritivo', `ts_body_${idx}`, step.body, (newLoc) => {
-                  const arr = [...(content.timelineSteps || [])]
-                  arr[idx] = { ...arr[idx], body: newLoc }
-                  updateField('timelineSteps', arr)
-                }, true)}
-
-                <MediaUploader
-                  label={`Mídia da Etapa #${idx + 1}`}
-                  media={step.media}
-                  onChange={(newMedia) => {
-                    const arr = [...(content.timelineSteps || [])]
-                    arr[idx] = { ...arr[idx], media: newMedia }
-                    updateField('timelineSteps', arr)
-                  }}
-                />
-              </div>
-            ))}
-
-            {renderLocaleInput('Frase em Destaque (Quote)', 'quoteText', content.quoteText, (v) =>
-              updateField('quoteText', v),
-              true
-            )}
-
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Galeria "A Casa"</h3>
-            {(content.houseGallery || [{}, {}, {}]).slice(0, 3).map((item, idx) => (
               <MediaUploader
-                key={idx}
-                label={`Foto / Vídeo #${idx + 1} da Galeria`}
-                media={item}
-                onChange={(newMedia) => {
-                  const arr = [...(content.houseGallery || [])]
-                  arr[idx] = newMedia
-                  updateField('houseGallery', arr)
-                }}
+                label="Foto / Vídeo de Abertura da Casa"
+                media={content.houseHeroMedia}
+                onChange={(media) => updateField('houseHeroMedia', media)}
               />
-            ))}
 
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Seção 02 — Regras da Casa</h3>
-            {renderLocaleInput('Selo das Regras', 'rulesEyebrow', content.rulesEyebrow, (v) =>
-              updateField('rulesEyebrow', v)
-            )}
-            {renderLocaleInput('Nota das Regras', 'rulesNote', content.rulesNote, (v) =>
-              updateField('rulesNote', v)
-            )}
-            {renderLocaleInput('Frase de Introdução das Regras', 'rulesIntro', content.rulesIntro, (v) =>
-              updateField('rulesIntro', v),
-              true
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h4 style={{ fontSize: 14, color: '#EDE6DD', margin: 0 }}>Lista de Regras</h4>
-              <button
-                type="button"
-                onClick={() => {
-                  const arr = [...(content.houseRules || [])]
-                  arr.push({ title: { pt: 'Nova Regra', en: 'New Rule' }, body: { pt: 'Descrição...', en: 'Description...' } })
-                  updateField('houseRules', arr)
-                }}
-                style={{ background: 'rgba(201,162,91,.15)', border: '1px solid rgba(201,162,91,.4)', color: '#C9A25B', fontSize: 12, padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}
-              >
-                + Adicionar Regra
-              </button>
+              {renderLocaleInput('Selo da Casa', 'houseHeroEyebrow', content.houseHeroEyebrow, (v) =>
+                updateField('houseHeroEyebrow', v)
+              )}
+              {renderLocaleInput('Título da Casa', 'houseHeroTitle', content.houseHeroTitle, (v) =>
+                updateField('houseHeroTitle', v)
+              )}
+              {renderLocaleInput('Subtítulo da Casa', 'houseHeroSubtitle', content.houseHeroSubtitle, (v) =>
+                updateField('houseHeroSubtitle', v)
+              )}
             </div>
 
-            {(content.houseRules || []).map((rule, idx) => (
-              <div key={idx} style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <h4 style={{ color: '#C9A25B', margin: 0, fontSize: 14 }}>Regra #{idx + 1}</h4>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const arr = [...(content.houseRules || [])]
-                      arr.splice(idx, 1)
-                      updateField('houseRules', arr)
+            {/* O PERCURSO / TIMELINE */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                2. O Percurso (4 Passos com Foto/Vídeo)
+              </h3>
+
+              {renderLocaleInput('Selo do Percurso', 'timelineEyebrow', content.timelineEyebrow, (v) =>
+                updateField('timelineEyebrow', v)
+              )}
+              {renderLocaleInput('Nota do Percurso', 'timelineNote', content.timelineNote, (v) =>
+                updateField('timelineNote', v)
+              )}
+
+              {(content.timelineSteps || []).map((step, idx) => (
+                <div key={idx} style={{ background: '#0B0809', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+                  <h4 style={{ color: '#C9A25B', margin: '0 0 12px 0', fontSize: 15 }}>
+                    Passo {idx + 1}: {step.title?.pt || 'Sem Título'}
+                  </h4>
+
+                  <MediaUploader
+                    label={`Foto / Vídeo do Passo ${idx + 1}`}
+                    media={step.media}
+                    onChange={(updatedMedia) => {
+                      const newSteps = [...(content.timelineSteps || [])]
+                      newSteps[idx] = { ...newSteps[idx], media: updatedMedia }
+                      updateField('timelineSteps', newSteps)
                     }}
-                    style={{ background: 'transparent', border: 'none', color: '#E06B78', fontSize: 12, cursor: 'pointer' }}
-                  >
-                    Excluir
-                  </button>
+                  />
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 10 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Horário / Etapa (PT)</label>
+                      <input
+                        type="text"
+                        value={step.kicker?.pt || ''}
+                        onChange={(e) => {
+                          const newSteps = [...(content.timelineSteps || [])]
+                          newSteps[idx] = { ...newSteps[idx], kicker: { ...newSteps[idx].kicker, pt: e.target.value } }
+                          updateField('timelineSteps', newSteps)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Horário / Etapa (EN)</label>
+                      <input
+                        type="text"
+                        value={step.kicker?.en || ''}
+                        onChange={(e) => {
+                          const newSteps = [...(content.timelineSteps || [])]
+                          newSteps[idx] = { ...newSteps[idx], kicker: { ...newSteps[idx].kicker, en: e.target.value } }
+                          updateField('timelineSteps', newSteps)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 10 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Título do Passo (PT)</label>
+                      <input
+                        type="text"
+                        value={step.title?.pt || ''}
+                        onChange={(e) => {
+                          const newSteps = [...(content.timelineSteps || [])]
+                          newSteps[idx] = { ...newSteps[idx], title: { ...newSteps[idx].title, pt: e.target.value } }
+                          updateField('timelineSteps', newSteps)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Título do Passo (EN)</label>
+                      <input
+                        type="text"
+                        value={step.title?.en || ''}
+                        onChange={(e) => {
+                          const newSteps = [...(content.timelineSteps || [])]
+                          newSteps[idx] = { ...newSteps[idx], title: { ...newSteps[idx].title, en: e.target.value } }
+                          updateField('timelineSteps', newSteps)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Texto Explicativo (PT)</label>
+                      <textarea
+                        rows={2}
+                        value={step.body?.pt || ''}
+                        onChange={(e) => {
+                          const newSteps = [...(content.timelineSteps || [])]
+                          newSteps[idx] = { ...newSteps[idx], body: { ...newSteps[idx].body, pt: e.target.value } }
+                          updateField('timelineSteps', newSteps)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Texto Explicativo (EN)</label>
+                      <textarea
+                        rows={2}
+                        value={step.body?.en || ''}
+                        onChange={(e) => {
+                          const newSteps = [...(content.timelineSteps || [])]
+                          newSteps[idx] = { ...newSteps[idx], body: { ...newSteps[idx].body, en: e.target.value } }
+                          updateField('timelineSteps', newSteps)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                  </div>
                 </div>
-                {renderLocaleInput('Título da Regra', `rule_title_${idx}`, rule.title, (newLoc) => {
-                  const arr = [...(content.houseRules || [])]
-                  arr[idx] = { ...arr[idx], title: newLoc }
-                  updateField('houseRules', arr)
-                })}
-                {renderLocaleInput('Descrição da Regra', `rule_body_${idx}`, rule.body, (newLoc) => {
-                  const arr = [...(content.houseRules || [])]
-                  arr[idx] = { ...arr[idx], body: newLoc }
-                  updateField('houseRules', arr)
-                }, true)}
-              </div>
-            ))}
-
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Seção 03 — Perguntas Frequentes (FAQ)</h3>
-            {renderLocaleInput('Selo do FAQ', 'faqEyebrow', content.faqEyebrow, (v) =>
-              updateField('faqEyebrow', v)
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h4 style={{ fontSize: 14, color: '#EDE6DD', margin: 0 }}>Perguntas Frequentes</h4>
-              <button
-                type="button"
-                onClick={() => {
-                  const arr = [...(content.faq || [])]
-                  arr.push({ question: { pt: 'Nova Pergunta?', en: 'New Question?' }, answer: { pt: 'Resposta...', en: 'Answer...' } })
-                  updateField('faq', arr)
-                }}
-                style={{ background: 'rgba(201,162,91,.15)', border: '1px solid rgba(201,162,91,.4)', color: '#C9A25B', fontSize: 12, padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}
-              >
-                + Adicionar Pergunta
-              </button>
+              ))}
             </div>
 
-            {(content.faq || []).map((item, idx) => (
-              <div key={idx} style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <h4 style={{ color: '#C9A25B', margin: 0, fontSize: 14 }}>Pergunta #{idx + 1}</h4>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const arr = [...(content.faq || [])]
-                      arr.splice(idx, 1)
-                      updateField('faq', arr)
-                    }}
-                    style={{ background: 'transparent', border: 'none', color: '#E06B78', fontSize: 12, cursor: 'pointer' }}
-                  >
-                    Excluir
-                  </button>
+            {/* DISCRETION QUOTE */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                3. Frase de Destaque sobre Discrição
+              </h3>
+              {renderLocaleInput('Frase de Destaque', 'quoteText', content.quoteText, (v) =>
+                updateField('quoteText', v),
+                true
+              )}
+            </div>
+
+            {/* HOUSE GALLERY */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                4. Galeria de Fotos / Vídeos da Casa (3 mídias)
+              </h3>
+
+              {[0, 1, 2].map((gIdx) => (
+                <MediaUploader
+                  key={gIdx}
+                  label={`Galeria da Casa - Foto / Vídeo ${gIdx + 1}`}
+                  media={content.houseGallery?.[gIdx]}
+                  onChange={(updatedMedia) => updateGalleryItem('houseGallery', gIdx, updatedMedia)}
+                />
+              ))}
+            </div>
+
+            {/* HOUSE RULES */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                5. As 5 Regras da Casa
+              </h3>
+
+              {renderLocaleInput('Selo das Regras', 'rulesEyebrow', content.rulesEyebrow, (v) =>
+                updateField('rulesEyebrow', v)
+              )}
+              {renderLocaleInput('Nota das Regras', 'rulesNote', content.rulesNote, (v) =>
+                updateField('rulesNote', v)
+              )}
+              {renderLocaleInput('Introdução das Regras', 'rulesIntro', content.rulesIntro, (v) =>
+                updateField('rulesIntro', v),
+                true
+              )}
+
+              {(content.houseRules || []).map((r, idx) => (
+                <div key={idx} style={{ background: '#0B0809', border: '1px solid rgba(201,162,91,.2)', borderRadius: 6, padding: 12, marginBottom: 12 }}>
+                  <h4 style={{ color: '#C9A25B', margin: '0 0 10px 0', fontSize: 14 }}>Regra {idx + 1}: {r.title?.pt || 'Sem Título'}</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                    <input
+                      type="text"
+                      placeholder="Título da Regra (PT)"
+                      value={r.title?.pt || ''}
+                      onChange={(e) => {
+                        const newRules = [...(content.houseRules || [])]
+                        newRules[idx] = { ...newRules[idx], title: { ...newRules[idx].title, pt: e.target.value } }
+                        updateField('houseRules', newRules)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Título da Regra (EN)"
+                      value={r.title?.en || ''}
+                      onChange={(e) => {
+                        const newRules = [...(content.houseRules || [])]
+                        newRules[idx] = { ...newRules[idx], title: { ...newRules[idx].title, en: e.target.value } }
+                        updateField('houseRules', newRules)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <textarea
+                      rows={2}
+                      placeholder="Texto da Regra (PT)"
+                      value={r.body?.pt || ''}
+                      onChange={(e) => {
+                        const newRules = [...(content.houseRules || [])]
+                        newRules[idx] = { ...newRules[idx], body: { ...newRules[idx].body, pt: e.target.value } }
+                        updateField('houseRules', newRules)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                    <textarea
+                      rows={2}
+                      placeholder="Texto da Regra (EN)"
+                      value={r.body?.en || ''}
+                      onChange={(e) => {
+                        const newRules = [...(content.houseRules || [])]
+                        newRules[idx] = { ...newRules[idx], body: { ...newRules[idx].body, en: e.target.value } }
+                        updateField('houseRules', newRules)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                  </div>
                 </div>
-                {renderLocaleInput('Pergunta', `faq_q_${idx}`, item.question, (newLoc) => {
-                  const arr = [...(content.faq || [])]
-                  arr[idx] = { ...arr[idx], question: newLoc }
-                  updateField('faq', arr)
-                })}
-                {renderLocaleInput('Resposta', `faq_a_${idx}`, item.answer, (newLoc) => {
-                  const arr = [...(content.faq || [])]
-                  arr[idx] = { ...arr[idx], answer: newLoc }
-                  updateField('faq', arr)
-                }, true)}
-              </div>
-            ))}
+              ))}
+            </div>
+
+            {/* FAQ */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                6. Perguntas Frequentes (FAQ)
+              </h3>
+
+              {renderLocaleInput('Selo do FAQ', 'faqEyebrow', content.faqEyebrow, (v) =>
+                updateField('faqEyebrow', v)
+              )}
+
+              {(content.faq || []).map((item, idx) => (
+                <div key={idx} style={{ background: '#0B0809', border: '1px solid rgba(201,162,91,.2)', borderRadius: 6, padding: 12, marginBottom: 12 }}>
+                  <h4 style={{ color: '#C9A25B', margin: '0 0 10px 0', fontSize: 14 }}>Pergunta {idx + 1}: {item.question?.pt || 'Sem Pergunta'}</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                    <input
+                      type="text"
+                      placeholder="Pergunta (PT)"
+                      value={item.question?.pt || ''}
+                      onChange={(e) => {
+                        const newFaq = [...(content.faq || [])]
+                        newFaq[idx] = { ...newFaq[idx], question: { ...newFaq[idx].question, pt: e.target.value } }
+                        updateField('faq', newFaq)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Pergunta (EN)"
+                      value={item.question?.en || ''}
+                      onChange={(e) => {
+                        const newFaq = [...(content.faq || [])]
+                        newFaq[idx] = { ...newFaq[idx], question: { ...newFaq[idx].question, en: e.target.value } }
+                        updateField('faq', newFaq)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <textarea
+                      rows={3}
+                      placeholder="Resposta (PT)"
+                      value={item.answer?.pt || ''}
+                      onChange={(e) => {
+                        const newFaq = [...(content.faq || [])]
+                        newFaq[idx] = { ...newFaq[idx], answer: { ...newFaq[idx].answer, pt: e.target.value } }
+                        updateField('faq', newFaq)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                    <textarea
+                      rows={3}
+                      placeholder="Resposta (EN)"
+                      value={item.answer?.en || ''}
+                      onChange={(e) => {
+                        const newFaq = [...(content.faq || [])]
+                        newFaq[idx] = { ...newFaq[idx], answer: { ...newFaq[idx].answer, en: e.target.value } }
+                        updateField('faq', newFaq)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-        {/* TAB 4: VALORES */}
+        {/* TAB 4: VALORES & AGENDAR */}
         {activeTab === 'rates' && (
           <div>
-            <h2 style={{ fontSize: 20, color: '#C9A25B', marginBottom: 20, fontWeight: 400 }}>Página "Valores"</h2>
+            <h2 style={{ fontSize: 20, color: '#C9A25B', marginBottom: 20, fontWeight: 400 }}>Valores & Agendar</h2>
 
-            {renderLocaleInput('Selo dos Valores', 'ratesEyebrow', content.ratesEyebrow, (v) =>
-              updateField('ratesEyebrow', v)
-            )}
-            {renderLocaleInput('Título Principal dos Valores', 'ratesTitle', content.ratesTitle, (v) =>
-              updateField('ratesTitle', v)
-            )}
-
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Ritual Noturno</h3>
-            <MediaUploader
-              label="Mídia do Ritual Noturno"
-              media={content.eveningRitualMedia}
-              onChange={(media) => updateField('eveningRitualMedia', media)}
-            />
-            {renderLocaleInput('Frase do Ritual Noturno', 'eveningRitualQuote', content.eveningRitualQuote, (v) =>
-              updateField('eveningRitualQuote', v),
-              true
-            )}
-            {renderLocaleInput('Legenda (ex: Ritual Noturno · 90 min · €260)', 'eveningRitualLabel', content.eveningRitualLabel, (v) =>
-              updateField('eveningRitualLabel', v)
-            )}
-
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Acréscimos</h3>
-            {renderLocaleInput('Selo dos Acréscimos', 'additionsEyebrow', content.additionsEyebrow, (v) =>
-              updateField('additionsEyebrow', v)
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h4 style={{ fontSize: 14, color: '#EDE6DD', margin: 0 }}>Lista de Acréscimos</h4>
-              <button
-                type="button"
-                onClick={() => {
-                  const arr = [...(content.additions || [])]
-                  arr.push({ title: { pt: 'Novo Acréscimo', en: 'New Addition' }, value: { pt: '€50', en: '€50' }, body: { pt: 'Descrição...', en: 'Description...' } })
-                  updateField('additions', arr)
-                }}
-                style={{ background: 'rgba(201,162,91,.15)', border: '1px solid rgba(201,162,91,.4)', color: '#C9A25B', fontSize: 12, padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}
-              >
-                + Adicionar Acréscimo
-              </button>
+            {/* HEADERS */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                1. Cabeçalho de Valores
+              </h3>
+              {renderLocaleInput('Selo dos Valores', 'ratesEyebrow', content.ratesEyebrow, (v) =>
+                updateField('ratesEyebrow', v)
+              )}
+              {renderLocaleInput('Título da Tabela de Valores', 'ratesTitle', content.ratesTitle, (v) =>
+                updateField('ratesTitle', v)
+              )}
             </div>
 
-            {(content.additions || []).map((add, idx) => (
-              <div key={idx} style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <h4 style={{ color: '#C9A25B', margin: 0, fontSize: 14 }}>Acréscimo #{idx + 1}</h4>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const arr = [...(content.additions || [])]
-                      arr.splice(idx, 1)
-                      updateField('additions', arr)
-                    }}
-                    style={{ background: 'transparent', border: 'none', color: '#E06B78', fontSize: 12, cursor: 'pointer' }}
-                  >
-                    Excluir
-                  </button>
+            {/* MASSAGE RATES & DURATIONS */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                2. Tabela de Preços e Tempos (As 4 Massagens)
+              </h3>
+
+              {(content.massages || []).map((m, idx) => (
+                <div key={idx} style={{ background: '#0B0809', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+                  <h4 style={{ color: '#C9A25B', margin: '0 0 12px 0', fontSize: 15 }}>
+                    Massagem {idx + 1}: {m.title?.pt || 'Sem Título'}
+                  </h4>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Descrição dos Valores (Português)</label>
+                      <textarea
+                        rows={2}
+                        value={m.rateDescription?.pt || ''}
+                        onChange={(e) => {
+                          const newMassages = [...(content.massages || [])]
+                          newMassages[idx] = { ...newMassages[idx], rateDescription: { ...newMassages[idx].rateDescription, pt: e.target.value } }
+                          updateField('massages', newMassages)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Descrição dos Valores (Inglês)</label>
+                      <textarea
+                        rows={2}
+                        value={m.rateDescription?.en || ''}
+                        onChange={(e) => {
+                          const newMassages = [...(content.massages || [])]
+                          newMassages[idx] = { ...newMassages[idx], rateDescription: { ...newMassages[idx].rateDescription, en: e.target.value } }
+                          updateField('massages', newMassages)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Duração 1 (ex: 60')</label>
+                      <input
+                        type="text"
+                        value={m.duration1 || ''}
+                        onChange={(e) => {
+                          const newMassages = [...(content.massages || [])]
+                          newMassages[idx] = { ...newMassages[idx], duration1: e.target.value }
+                          updateField('massages', newMassages)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Preço 1 (ex: €120)</label>
+                      <input
+                        type="text"
+                        value={m.price1 || ''}
+                        onChange={(e) => {
+                          const newMassages = [...(content.massages || [])]
+                          newMassages[idx] = { ...newMassages[idx], price1: e.target.value }
+                          updateField('massages', newMassages)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Duração 2 (ex: 90')</label>
+                      <input
+                        type="text"
+                        value={m.duration2 || ''}
+                        onChange={(e) => {
+                          const newMassages = [...(content.massages || [])]
+                          newMassages[idx] = { ...newMassages[idx], duration2: e.target.value }
+                          updateField('massages', newMassages)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>Preço 2 (ex: €165)</label>
+                      <input
+                        type="text"
+                        value={m.price2 || ''}
+                        onChange={(e) => {
+                          const newMassages = [...(content.massages || [])]
+                          newMassages[idx] = { ...newMassages[idx], price2: e.target.value }
+                          updateField('massages', newMassages)
+                        }}
+                        style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                      />
+                    </div>
+                  </div>
                 </div>
-                {renderLocaleInput('Título', `add_title_${idx}`, add.title, (newLoc) => {
-                  const arr = [...(content.additions || [])]
-                  arr[idx] = { ...arr[idx], title: newLoc }
-                  updateField('additions', arr)
-                })}
-                {renderLocaleInput('Valor / Desconto (ex: €260, −15%)', `add_val_${idx}`, add.value, (newLoc) => {
-                  const arr = [...(content.additions || [])]
-                  arr[idx] = { ...arr[idx], value: newLoc }
-                  updateField('additions', arr)
-                })}
-                {renderLocaleInput('Descrição', `add_body_${idx}`, add.body, (newLoc) => {
-                  const arr = [...(content.additions || [])]
-                  arr[idx] = { ...arr[idx], body: newLoc }
-                  updateField('additions', arr)
-                }, true)}
-              </div>
-            ))}
+              ))}
+            </div>
 
-            <h3 style={{ fontSize: 16, color: '#C9A25B', marginTop: 28, marginBottom: 16 }}>Pagamento & Cancelamento</h3>
-            {renderLocaleInput('Título do Pagamento', 'paymentTitle', content.paymentTitle, (v) =>
-              updateField('paymentTitle', v)
-            )}
-            {renderLocaleInput('Texto de Formas de Pagamento', 'paymentBody', content.paymentBody, (v) =>
-              updateField('paymentBody', v),
-              true
-            )}
-            {renderLocaleInput('Título do Cancelamento', 'cancellationTitle', content.cancellationTitle, (v) =>
-              updateField('cancellationTitle', v)
-            )}
-            {renderLocaleInput('Texto da Política de Cancelamento', 'cancellationBody', content.cancellationBody, (v) =>
-              updateField('cancellationBody', v),
-              true
-            )}
-          </div>
-        )}
+            {/* EVENING RITUAL */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                3. Banner de Destaque - Ritual Noturno
+              </h3>
 
-        {/* TAB 5: AGENDAMENTO */}
-        {activeTab === 'booking' && (
-          <div>
-            <h2 style={{ fontSize: 20, color: '#C9A25B', marginBottom: 20, fontWeight: 400 }}>Página "Agendamento"</h2>
+              <MediaUploader
+                label="Foto / Vídeo do Ritual Noturno"
+                media={content.eveningRitualMedia}
+                onChange={(media) => updateField('eveningRitualMedia', media)}
+              />
 
-            {renderLocaleInput('Selo de Agendamento', 'bookingEyebrow', content.bookingEyebrow, (v) =>
-              updateField('bookingEyebrow', v)
-            )}
-            {renderLocaleInput('Título de Agendamento', 'bookingTitle', content.bookingTitle, (v) =>
-              updateField('bookingTitle', v)
-            )}
+              {renderLocaleInput('Citação do Ritual Noturno', 'eveningRitualQuote', content.eveningRitualQuote, (v) =>
+                updateField('eveningRitualQuote', v)
+              )}
+              {renderLocaleInput('Etiqueta e Valor (ex: Ritual Noturno · 90 min · €260)', 'eveningRitualLabel', content.eveningRitualLabel, (v) =>
+                updateField('eveningRitualLabel', v)
+              )}
+            </div>
 
-            <MediaUploader
-              label="Foto / Vídeo Lateral da Tela de Agendamento"
-              media={content.bookingSidebarMedia}
-              onChange={(media) => updateField('bookingSidebarMedia', media)}
-            />
+            {/* ADDITIONS */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                4. Acréscimos (3 Itens)
+              </h3>
 
-            {renderLocaleInput('Nota "Antes de Enviar"', 'bookingBeforeSendNote', content.bookingBeforeSendNote, (v) =>
-              updateField('bookingBeforeSendNote', v),
-              true
-            )}
-            {renderLocaleInput('Mensagem de Confirmação (pós-envio)', 'bookingConfirmation', content.bookingConfirmation, (v) =>
-              updateField('bookingConfirmation', v)
-            )}
+              {renderLocaleInput('Selo dos Acréscimos', 'additionsEyebrow', content.additionsEyebrow, (v) =>
+                updateField('additionsEyebrow', v)
+              )}
+
+              {(content.additions || []).map((add, idx) => (
+                <div key={idx} style={{ background: '#0B0809', border: '1px solid rgba(201,162,91,.2)', borderRadius: 6, padding: 12, marginBottom: 12 }}>
+                  <h4 style={{ color: '#C9A25B', margin: '0 0 10px 0', fontSize: 14 }}>Acréscimo {idx + 1}: {add.title?.pt || 'Sem Título'}</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px', gap: 10, marginBottom: 10 }}>
+                    <input
+                      type="text"
+                      placeholder="Nome (PT)"
+                      value={add.title?.pt || ''}
+                      onChange={(e) => {
+                        const newAdditions = [...(content.additions || [])]
+                        newAdditions[idx] = { ...newAdditions[idx], title: { ...newAdditions[idx].title, pt: e.target.value } }
+                        updateField('additions', newAdditions)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Nome (EN)"
+                      value={add.title?.en || ''}
+                      onChange={(e) => {
+                        const newAdditions = [...(content.additions || [])]
+                        newAdditions[idx] = { ...newAdditions[idx], title: { ...newAdditions[idx].title, en: e.target.value } }
+                        updateField('additions', newAdditions)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Valor (ex: €60)"
+                      value={add.value?.pt || ''}
+                      onChange={(e) => {
+                        const newAdditions = [...(content.additions || [])]
+                        newAdditions[idx] = {
+                          ...newAdditions[idx],
+                          value: { pt: e.target.value, en: e.target.value },
+                        }
+                        updateField('additions', newAdditions)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <textarea
+                      rows={2}
+                      placeholder="Descrição (PT)"
+                      value={add.body?.pt || ''}
+                      onChange={(e) => {
+                        const newAdditions = [...(content.additions || [])]
+                        newAdditions[idx] = { ...newAdditions[idx], body: { ...newAdditions[idx].body, pt: e.target.value } }
+                        updateField('additions', newAdditions)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                    <textarea
+                      rows={2}
+                      placeholder="Descrição (EN)"
+                      value={add.body?.en || ''}
+                      onChange={(e) => {
+                        const newAdditions = [...(content.additions || [])]
+                        newAdditions[idx] = { ...newAdditions[idx], body: { ...newAdditions[idx].body, en: e.target.value } }
+                        updateField('additions', newAdditions)
+                      }}
+                      style={{ width: '100%', background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 4, padding: '6px 10px', color: '#EDE6DD', fontSize: 13 }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* PAYMENT & CANCELLATION */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                5. Pagamento & Política de Cancelamento
+              </h3>
+              {renderLocaleInput('Título - Formas de Pagamento', 'paymentTitle', content.paymentTitle, (v) =>
+                updateField('paymentTitle', v)
+              )}
+              {renderLocaleInput('Texto - Formas de Pagamento', 'paymentBody', content.paymentBody, (v) =>
+                updateField('paymentBody', v),
+                true
+              )}
+              {renderLocaleInput('Título - Cancelamento', 'cancellationTitle', content.cancellationTitle, (v) =>
+                updateField('cancellationTitle', v)
+              )}
+              {renderLocaleInput('Texto - Cancelamento', 'cancellationBody', content.cancellationBody, (v) =>
+                updateField('cancellationBody', v),
+                true
+              )}
+            </div>
+
+            {/* BOOKING SECTION */}
+            <div style={{ background: '#130D0F', border: '1px solid rgba(201,162,91,.2)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+              <h3 style={{ color: '#C9A25B', fontSize: 16, marginTop: 0, marginBottom: 16, fontWeight: 500 }}>
+                6. Seção de Agendamento
+              </h3>
+
+              <MediaUploader
+                label="Foto / Vídeo Lateral do Formulário de Agendamento"
+                media={content.bookingSidebarMedia}
+                onChange={(media) => updateField('bookingSidebarMedia', media)}
+              />
+
+              {renderLocaleInput('Selo do Agendamento', 'bookingEyebrow', content.bookingEyebrow, (v) =>
+                updateField('bookingEyebrow', v)
+              )}
+              {renderLocaleInput('Título do Agendamento', 'bookingTitle', content.bookingTitle, (v) =>
+                updateField('bookingTitle', v)
+              )}
+              {renderLocaleInput('Nota antes de Enviar o Pedido', 'bookingBeforeSendNote', content.bookingBeforeSendNote, (v) =>
+                updateField('bookingBeforeSendNote', v),
+                true
+              )}
+              {renderLocaleInput('Mensagem de Confirmação', 'bookingConfirmation', content.bookingConfirmation, (v) =>
+                updateField('bookingConfirmation', v)
+              )}
+            </div>
           </div>
         )}
       </div>
