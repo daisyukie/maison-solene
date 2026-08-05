@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import type { SiteMedia } from '@/sanity/lib/types'
 import { parseMediaUrl } from '@/lib/mediaHelper'
 import { upload } from '@vercel/blob/client'
@@ -11,48 +11,22 @@ interface MediaUploaderProps {
   onChange: (updatedMedia: SiteMedia) => void
 }
 
-function compressImage(file: File, maxWidth = 1400, quality = 0.85): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    const url = URL.createObjectURL(file)
-    img.src = url
-    img.onload = () => {
-      let width = img.width
-      let height = img.height
-
-      if (width > maxWidth) {
-        height = Math.round((height * maxWidth) / width)
-        width = maxWidth
-      }
-
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-
-      const ctx = canvas.getContext('2d')
-      if (!ctx) {
-        URL.revokeObjectURL(url)
-        reject(new Error('Canvas context error'))
-        return
-      }
-
-      ctx.drawImage(img, 0, 0, width, height)
-      const dataUrl = canvas.toDataURL('image/webp', quality)
-      URL.revokeObjectURL(url)
-      resolve(dataUrl)
-    }
-    img.onerror = (err) => {
-      URL.revokeObjectURL(url)
-      reject(err)
-    }
-  })
-}
-
 export default function MediaUploader({ label, media = {}, onChange }: MediaUploaderProps) {
   const [uploading, setUploading] = useState(false)
+  const [tempPreviewUrl, setTempPreviewUrl] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const rawUrl = media.url || media.imageUrl || media.videoUrl || media.video?.asset?.url
+  // Clean up object URL when component unmounts or tempPreviewUrl changes
+  useEffect(() => {
+    return () => {
+      if (tempPreviewUrl && tempPreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(tempPreviewUrl)
+      }
+    }
+  }, [tempPreviewUrl])
+
+  // Determine active media URL (prioritize clean HTTPS/Blob URLs over data URLs)
+  const rawUrl = tempPreviewUrl || media.url || media.imageUrl || media.videoUrl || media.video?.asset?.url
   const mediaInfo = parseMediaUrl(rawUrl)
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -62,88 +36,84 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
     setUploading(true)
     const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv)$/i.test(file.name)
 
-    // 1. Try direct client-side upload to Vercel Blob (bypasses 4.5MB POST limit)
+    // Rule 4: Create temporary object URL for instant preview and revoke after upload
+    const objectUrl = URL.createObjectURL(file)
+    setTempPreviewUrl(objectUrl)
+
     try {
+      // Rule 1: Direct client-side upload to Vercel Blob
       const newBlob = await upload(file.name, file, {
         access: 'public',
         handleUploadUrl: '/api/upload/client',
       })
-      if (newBlob.url) {
-        if (isVideo) {
-          onChange({ ...media, url: newBlob.url, videoUrl: newBlob.url, imageUrl: undefined })
+
+      if (newBlob?.url) {
+        // Save EXCLUSIVELY the HTTPS blob.url in state (Rule 1, 2, 3)
+        onChange({
+          hint: media.hint,
+          url: newBlob.url,
+          videoUrl: isVideo ? newBlob.url : undefined,
+          imageUrl: !isVideo ? newBlob.url : undefined,
+        })
+      }
+    } catch (err: unknown) {
+      console.warn('Upload direto via Vercel Blob não concluído:', err)
+
+      // Fallback: try server upload endpoint
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        const res = await fetch('/api/upload', { method: 'POST', body: formData })
+        const data = await res.json()
+
+        if (data?.url && !data.url.startsWith('data:')) {
+          onChange({
+            hint: media.hint,
+            url: data.url,
+            videoUrl: isVideo ? data.url : undefined,
+            imageUrl: !isVideo ? data.url : undefined,
+          })
         } else {
-          onChange({ ...media, url: newBlob.url, imageUrl: newBlob.url, videoUrl: undefined })
+          alert('Para arquivos de vídeo/foto, ative o Vercel Blob no painel da Vercel ou cole o link HTTPS direto.')
         }
-        setUploading(false)
-        return
+      } catch {
+        alert('Erro ao realizar upload do arquivo.')
       }
-    } catch {}
-
-    // 2. Try server upload /api/upload
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      })
-      const data = await res.json()
-
-      if (data.url) {
-        if (isVideo) {
-          onChange({ ...media, url: data.url, videoUrl: data.url, imageUrl: undefined })
-        } else {
-          onChange({ ...media, url: data.url, imageUrl: data.url, videoUrl: undefined })
-        }
-        setUploading(false)
-        return
-      }
-    } catch {}
-
-    // 2. Fallback
-    if (isVideo) {
-      const reader = new FileReader()
-      reader.onload = () => {
-        const dataUrl = reader.result as string
-        onChange({ ...media, url: dataUrl, videoUrl: dataUrl, imageUrl: undefined })
-        setUploading(false)
-      }
-      reader.onerror = () => {
-        alert('Erro ao ler arquivo de vídeo')
-        setUploading(false)
-      }
-      reader.readAsDataURL(file)
-      return
-    }
-
-    try {
-      const compressedDataUrl = await compressImage(file)
-      onChange({ ...media, url: compressedDataUrl, imageUrl: compressedDataUrl, videoUrl: undefined })
-    } catch {
-      const reader = new FileReader()
-      reader.onload = () => {
-        const dataUrl = reader.result as string
-        onChange({ ...media, url: dataUrl, imageUrl: dataUrl, videoUrl: undefined })
-      }
-      reader.readAsDataURL(file)
     } finally {
+      // Rule 4: Revoke temporary preview Object URL immediately after upload completes/fails
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+      }
+      setTempPreviewUrl(null)
       setUploading(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
     }
   }
 
   const handleRemove = () => {
+    if (tempPreviewUrl && tempPreviewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(tempPreviewUrl)
+    }
+    setTempPreviewUrl(null)
     onChange({
       hint: media.hint,
     })
   }
 
   const handleUrlInputChange = (newUrl: string) => {
-    const parsed = parseMediaUrl(newUrl)
+    const cleanUrl = newUrl.trim()
+    if (cleanUrl.startsWith('data:')) {
+      alert('URLs de dados Base64 não são permitidas. Cole um link HTTPS válido.')
+      return
+    }
+
+    const parsed = parseMediaUrl(cleanUrl)
     if (parsed.type === 'vimeo' || parsed.type === 'youtube' || parsed.type === 'video') {
-      onChange({ ...media, url: newUrl, videoUrl: newUrl, imageUrl: undefined })
+      onChange({ hint: media.hint, url: cleanUrl, videoUrl: cleanUrl, imageUrl: undefined })
     } else {
-      onChange({ ...media, url: newUrl, imageUrl: newUrl, videoUrl: undefined })
+      onChange({ hint: media.hint, url: cleanUrl, imageUrl: cleanUrl, videoUrl: undefined })
     }
   }
 
@@ -167,7 +137,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
           )}
         </div>
 
-        {mediaInfo.type !== 'none' && (
+        {(mediaInfo.type !== 'none' || tempPreviewUrl) && (
           <button
             type="button"
             onClick={handleRemove}
@@ -263,7 +233,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
               fontSize: 13,
             }}
           >
-            Processando mídia...
+            Processando upload para Vercel Blob...
           </div>
         )}
       </div>
@@ -294,7 +264,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
               cursor: 'pointer',
             }}
           >
-            {uploading ? 'Processando...' : mediaInfo.type !== 'none' ? 'Trocar Mídia' : '+ Enviar Foto ou Vídeo'}
+            {uploading ? 'Enviando...' : mediaInfo.type !== 'none' ? 'Trocar Mídia' : '+ Enviar Foto ou Vídeo'}
           </button>
 
           <span style={{ fontSize: 11, color: '#7C7369' }}>Suporta JPG, PNG, WEBP, MP4, WEBM, Vimeo e YouTube</span>
@@ -303,13 +273,13 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
         {/* Direct Link Input Option */}
         <div>
           <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>
-            Ou cole a URL/link (Vimeo, YouTube, MP4, WebP, JPG):
+            Ou cole a URL/link HTTPS (Vercel Blob, Vimeo, YouTube, MP4, WEBP, JPG):
           </label>
           <input
             type="text"
-            value={rawUrl || ''}
+            value={rawUrl && !rawUrl.startsWith('blob:') ? rawUrl : ''}
             onChange={(e) => handleUrlInputChange(e.target.value)}
-            placeholder="https://vimeo.com/1215661617 ou https://youtu.be/... ou link .mp4"
+            placeholder="https://...blob.vercel-storage.com/... ou https://vimeo.com/..."
             style={{
               width: '100%',
               background: '#0B0809',

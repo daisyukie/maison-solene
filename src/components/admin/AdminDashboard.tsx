@@ -102,13 +102,69 @@ export default function AdminDashboard({ initialContent, onLogout }: AdminDashbo
     }
   }
 
+  // Helper to sanitize SiteMedia objects (ensures NO data: or blob: temporary strings are saved)
+  const sanitizeMedia = (media?: SiteMedia): SiteMedia | undefined => {
+    if (!media) return undefined
+    let url = media.url
+    let videoUrl = media.videoUrl
+    let imageUrl = media.imageUrl
+
+    if (url && (url.startsWith('data:') || url.startsWith('blob:'))) url = undefined
+    if (videoUrl && (videoUrl.startsWith('data:') || videoUrl.startsWith('blob:'))) videoUrl = undefined
+    if (imageUrl && (imageUrl.startsWith('data:') || imageUrl.startsWith('blob:'))) imageUrl = undefined
+
+    const finalUrl = url || videoUrl || imageUrl
+    if (!finalUrl && !media.hint) return undefined
+
+    return {
+      hint: media.hint,
+      url: finalUrl,
+      videoUrl: videoUrl || (finalUrl && !imageUrl ? finalUrl : undefined),
+      imageUrl: imageUrl || (finalUrl && !videoUrl ? finalUrl : undefined),
+    }
+  }
+
+  const sanitizeContentForSaving = (rawContent: SiteContent): SiteContent => {
+    const cleaned = { ...rawContent }
+
+    cleaned.heroMedia = sanitizeMedia(cleaned.heroMedia)
+    cleaned.houseIntroMedia = sanitizeMedia(cleaned.houseIntroMedia)
+    cleaned.videoBannerMedia = sanitizeMedia(cleaned.videoBannerMedia)
+    cleaned.houseHeroMedia = sanitizeMedia(cleaned.houseHeroMedia)
+    cleaned.eveningRitualMedia = sanitizeMedia(cleaned.eveningRitualMedia)
+    cleaned.bookingSidebarMedia = sanitizeMedia(cleaned.bookingSidebarMedia)
+
+    if (cleaned.homeGallery) {
+      cleaned.homeGallery = cleaned.homeGallery.map((m) => sanitizeMedia(m)!).filter(Boolean)
+    }
+    if (cleaned.houseGallery) {
+      cleaned.houseGallery = cleaned.houseGallery.map((m) => sanitizeMedia(m)!).filter(Boolean)
+    }
+    if (cleaned.massages) {
+      cleaned.massages = cleaned.massages.map((m) => ({ ...m, media: sanitizeMedia(m.media) }))
+    }
+    if (cleaned.timelineSteps) {
+      cleaned.timelineSteps = cleaned.timelineSteps.map((s) => ({ ...s, media: sanitizeMedia(s.media) }))
+    }
+
+    return cleaned
+  }
+
   // Save changes
   const handleSave = async () => {
     setSaving(true)
 
-    const jsonString = JSON.stringify(content)
+    // Rule 1, 2, 3: Sanitize content before saving to strip any base64/blob temporary URLs
+    const cleanedContent = sanitizeContentForSaving(content)
+    const jsonString = JSON.stringify(cleanedContent)
     const payloadBytes = new Blob([jsonString]).size
     const payloadMB = payloadBytes / (1024 * 1024)
+
+    // Rule 7: Console log payload and confirm no values start with data:video or data:image
+    console.log('[SAVING PAYLOAD]', jsonString.substring(0, 300) + '... (Total MB: ' + payloadMB.toFixed(3) + ')')
+    const hasDataVideo = jsonString.includes('data:video/')
+    const hasDataImage = jsonString.includes('data:image/')
+    console.log('[PAYLOAD VALIDATION] Contains data:video?', hasDataVideo, '| Contains data:image?', hasDataImage)
 
     if (payloadMB > 3.8) {
       showToast(`O conteúdo do site (${payloadMB.toFixed(1)}MB) está próximo do limite de 4.5MB da Vercel. Por favor, utilize links diretos de vídeo para economizar espaço.`, 'error')
