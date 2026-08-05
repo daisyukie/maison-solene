@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react'
 import type { SiteMedia } from '@/sanity/lib/types'
 import { parseMediaUrl } from '@/lib/mediaHelper'
+import { upload } from '@vercel/blob/client'
 
 interface MediaUploaderProps {
   label: string
@@ -61,7 +62,24 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
     setUploading(true)
     const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv)$/i.test(file.name)
 
-    // 1. Try uploading to /api/upload (Vercel Blob / Server storage)
+    // 1. Try direct client-side upload to Vercel Blob (bypasses 4.5MB POST limit)
+    try {
+      const newBlob = await upload(file.name, file, {
+        access: 'public',
+        handleUploadUrl: '/api/upload/client',
+      })
+      if (newBlob.url) {
+        if (isVideo) {
+          onChange({ ...media, url: newBlob.url, videoUrl: newBlob.url, imageUrl: undefined })
+        } else {
+          onChange({ ...media, url: newBlob.url, imageUrl: newBlob.url, videoUrl: undefined })
+        }
+        setUploading(false)
+        return
+      }
+    } catch {}
+
+    // 2. Try server upload /api/upload
     try {
       const formData = new FormData()
       formData.append('file', file)
