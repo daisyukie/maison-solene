@@ -75,6 +75,9 @@ function nextGradient(): string {
  * been uploaded in the CMS yet, so the site never looks broken pre-launch.
  */
 function mediaBlock(media: SiteMedia | undefined, variant: 'ambient' | 'feature' = 'ambient'): string {
+  const isExplicitVideo = Boolean(media?.videoUrl || media?.video?.asset?.url)
+  const isExplicitImage = Boolean(media?.imageUrl || media?.image)
+
   const rawUrl =
     media?.videoUrl ||
     media?.imageUrl ||
@@ -82,7 +85,7 @@ function mediaBlock(media: SiteMedia | undefined, variant: 'ambient' | 'feature'
     media?.video?.asset?.url ||
     (media?.image ? urlFor(media.image).width(1600).auto('format').url() : undefined)
 
-  const info = parseMediaUrl(rawUrl)
+  const info = parseMediaUrl(rawUrl, isExplicitVideo, isExplicitImage)
 
   if (info.type === 'vimeo') {
     return `<iframe src="${escAttr(info.embedUrl)}" style="position:absolute;inset:-10%;width:120%;height:120%;border:none;pointer-events:none" allow="autoplay; fullscreen" frameborder="0"></iframe>`

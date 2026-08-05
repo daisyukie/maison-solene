@@ -5,7 +5,7 @@ export type MediaUrlInfo =
   | { type: 'image'; url: string }
   | { type: 'none' }
 
-export function parseMediaUrl(rawUrl?: string): MediaUrlInfo {
+export function parseMediaUrl(rawUrl?: string, isExplicitVideo?: boolean, isExplicitImage?: boolean): MediaUrlInfo {
   if (!rawUrl || !rawUrl.trim()) return { type: 'none' }
   const url = rawUrl.trim()
 
@@ -31,16 +31,23 @@ export function parseMediaUrl(rawUrl?: string): MediaUrlInfo {
     }
   }
 
-  // 3. Direct video file match
-  if (
-    /\.(mp4|webm|mov|mkv)($|\?)/i.test(url) ||
-    url.includes('video') ||
-    url.startsWith('data:video/') ||
-    url.includes('blob.vercel-storage.com')
-  ) {
+  // 3. Explicit or extension match for images (.jpg, .png, .webp, .gif, .avif, .svg)
+  const isImageExt = /\.(jpg|jpeg|png|webp|gif|avif|svg)($|\?)/i.test(url) || url.startsWith('data:image/')
+  if (isExplicitImage || isImageExt) {
+    return { type: 'image', url }
+  }
+
+  // 4. Explicit or extension match for videos (.mp4, .webm, .mov, .mkv, .m4v)
+  const isVideoExt = /\.(mp4|webm|mov|mkv|m4v)($|\?)/i.test(url) || url.startsWith('data:video/')
+  if (isExplicitVideo || isVideoExt) {
     return { type: 'video', url }
   }
 
-  // 4. Image or Data URL
+  // 5. Check if URL contains 'video' in name
+  if (url.toLowerCase().includes('video')) {
+    return { type: 'video', url }
+  }
+
+  // Default fallback for any other image CDN URL (Vercel Blob, Unsplash, etc.)
   return { type: 'image', url }
 }
