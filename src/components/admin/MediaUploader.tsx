@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react'
 import type { SiteMedia } from '@/sanity/lib/types'
+import { parseMediaUrl } from '@/lib/mediaHelper'
 
 interface MediaUploaderProps {
   label: string
@@ -51,19 +52,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const rawUrl = media.url || media.imageUrl || media.videoUrl || media.video?.asset?.url
-
-  const videoUrl =
-    media.videoUrl ||
-    media.video?.asset?.url ||
-    (media.url && (/\.(mp4|webm|mov|mkv)($|\?)/i.test(media.url) || media.url.includes('video') || media.url.startsWith('data:video/'))
-      ? media.url
-      : undefined)
-
-  const imageUrl =
-    media.imageUrl ||
-    (media.url && !(/\.(mp4|webm|mov|mkv)($|\?)/i.test(media.url) || media.url.includes('video') || media.url.startsWith('data:video/'))
-      ? media.url
-      : undefined)
+  const mediaInfo = parseMediaUrl(rawUrl)
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -72,7 +61,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
     setUploading(true)
     const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv)$/i.test(file.name)
 
-    // 1. Try uploading to /api/upload (handles Vercel Blob / server storage)
+    // 1. Try uploading to /api/upload (Vercel Blob / Server storage)
     try {
       const formData = new FormData()
       formData.append('file', file)
@@ -94,7 +83,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
       }
     } catch {}
 
-    // 2. Fallback processing
+    // 2. Fallback
     if (isVideo) {
       const reader = new FileReader()
       reader.onload = () => {
@@ -110,7 +99,6 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
       return
     }
 
-    // Image compression fallback
     try {
       const compressedDataUrl = await compressImage(file)
       onChange({ ...media, url: compressedDataUrl, imageUrl: compressedDataUrl, videoUrl: undefined })
@@ -133,8 +121,8 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
   }
 
   const handleUrlInputChange = (newUrl: string) => {
-    const isVideo = /\.(mp4|webm|mov|mkv)($|\?)/i.test(newUrl) || newUrl.includes('video')
-    if (isVideo) {
+    const parsed = parseMediaUrl(newUrl)
+    if (parsed.type === 'vimeo' || parsed.type === 'youtube' || parsed.type === 'video') {
       onChange({ ...media, url: newUrl, videoUrl: newUrl, imageUrl: undefined })
     } else {
       onChange({ ...media, url: newUrl, imageUrl: newUrl, videoUrl: undefined })
@@ -161,7 +149,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
           )}
         </div>
 
-        {(videoUrl || imageUrl || rawUrl) && (
+        {mediaInfo.type !== 'none' && (
           <button
             type="button"
             onClick={handleRemove}
@@ -184,7 +172,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
       <div
         style={{
           width: '100%',
-          height: 160,
+          height: 180,
           background: '#0B0809',
           borderRadius: 6,
           border: '1px dashed rgba(201,162,91,.3)',
@@ -195,10 +183,22 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
           position: 'relative',
         }}
       >
-        {videoUrl ? (
-          <video src={videoUrl} controls style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        ) : imageUrl ? (
-          <img src={imageUrl} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        {mediaInfo.type === 'vimeo' ? (
+          <iframe
+            src={mediaInfo.embedUrl}
+            style={{ width: '100%', height: '100%', border: 'none' }}
+            allow="autoplay; fullscreen"
+          />
+        ) : mediaInfo.type === 'youtube' ? (
+          <iframe
+            src={mediaInfo.embedUrl}
+            style={{ width: '100%', height: '100%', border: 'none' }}
+            allow="autoplay; encrypted-media"
+          />
+        ) : mediaInfo.type === 'video' ? (
+          <video src={mediaInfo.url} controls style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : mediaInfo.type === 'image' ? (
+          <img src={mediaInfo.url} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         ) : (
           <div style={{ textAlign: 'center', padding: 12, color: '#7C7369' }}>
             <span style={{ fontSize: 24, display: 'block', marginBottom: 4 }}>📷 / 🎬</span>
@@ -250,22 +250,22 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
               cursor: 'pointer',
             }}
           >
-            {uploading ? 'Processando...' : videoUrl || imageUrl ? 'Trocar Mídia' : '+ Enviar Foto ou Vídeo'}
+            {uploading ? 'Processando...' : mediaInfo.type !== 'none' ? 'Trocar Mídia' : '+ Enviar Foto ou Vídeo'}
           </button>
 
-          <span style={{ fontSize: 11, color: '#7C7369' }}>Suporta JPG, PNG, WEBP, MP4, WEBM</span>
+          <span style={{ fontSize: 11, color: '#7C7369' }}>Suporta JPG, PNG, WEBP, MP4, WEBM, Vimeo e YouTube</span>
         </div>
 
         {/* Direct Link Input Option */}
         <div>
           <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>
-            Ou cole o link/URL direto da foto ou vídeo:
+            Ou cole a URL/link (Vimeo, YouTube, MP4, WebP, JPG):
           </label>
           <input
             type="text"
             value={rawUrl || ''}
             onChange={(e) => handleUrlInputChange(e.target.value)}
-            placeholder="https://exemplo.com/meu-video.mp4 ou foto.jpg"
+            placeholder="https://vimeo.com/1215661617 ou https://youtu.be/... ou link .mp4"
             style={{
               width: '100%',
               background: '#0B0809',

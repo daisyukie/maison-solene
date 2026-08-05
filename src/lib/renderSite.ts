@@ -1,5 +1,6 @@
 import { urlFor } from '@/sanity/lib/image'
 import type { LocaleString, LocaleText, SiteContent, SiteMedia } from '@/sanity/lib/types'
+import { parseMediaUrl } from '@/lib/mediaHelper'
 
 function escText(s?: string): string {
   if (!s) return ''
@@ -74,25 +75,33 @@ function nextGradient(): string {
  * been uploaded in the CMS yet, so the site never looks broken pre-launch.
  */
 function mediaBlock(media: SiteMedia | undefined, variant: 'ambient' | 'feature' = 'ambient'): string {
-  const videoUrl =
+  const rawUrl =
     media?.videoUrl ||
-    media?.video?.asset?.url ||
-    (media?.url && (/\.(mp4|webm|mov|mkv)($|\?)/i.test(media.url) || media.url.includes('video')) ? media.url : undefined)
-  const imageUrl =
     media?.imageUrl ||
-    (media?.image ? urlFor(media.image).width(1600).auto('format').url() : undefined) ||
-    (media?.url && !/\.(mp4|webm|mov|mkv)($|\?)/i.test(media.url) ? media.url : undefined)
+    media?.url ||
+    media?.video?.asset?.url ||
+    (media?.image ? urlFor(media.image).width(1600).auto('format').url() : undefined)
 
-  if (videoUrl) {
-    const poster = imageUrl ? ` poster="${escAttr(imageUrl)}"` : ''
-    if (variant === 'feature') {
-      return `<video src="${escAttr(videoUrl)}"${poster} controls playsinline preload="metadata" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#0C0708"></video>`
-    }
-    return `<video src="${escAttr(videoUrl)}"${poster} autoplay muted loop playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#0C0708"></video>`
+  const info = parseMediaUrl(rawUrl)
+
+  if (info.type === 'vimeo') {
+    return `<iframe src="${escAttr(info.embedUrl)}" style="position:absolute;inset:-10%;width:120%;height:120%;border:none;pointer-events:none" allow="autoplay; fullscreen" frameborder="0"></iframe>`
   }
 
-  if (imageUrl) {
-    return `<img src="${escAttr(imageUrl)}" alt="${escAttr(media?.hint)}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover" />`
+  if (info.type === 'youtube') {
+    return `<iframe src="${escAttr(info.embedUrl)}" style="position:absolute;inset:-10%;width:120%;height:120%;border:none;pointer-events:none" allow="autoplay; encrypted-media" frameborder="0"></iframe>`
+  }
+
+  if (info.type === 'video') {
+    const poster = media?.imageUrl ? ` poster="${escAttr(media.imageUrl)}"` : ''
+    if (variant === 'feature') {
+      return `<video src="${escAttr(info.url)}"${poster} controls playsinline preload="metadata" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#0C0708"></video>`
+    }
+    return `<video src="${escAttr(info.url)}"${poster} autoplay muted loop playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#0C0708"></video>`
+  }
+
+  if (info.type === 'image') {
+    return `<img src="${escAttr(info.url)}" alt="${escAttr(media?.hint)}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover" />`
   }
 
   const caption = media?.hint
