@@ -9,6 +9,9 @@ export type LocaleText = LocaleString
 
 export interface SiteMedia {
   hint?: string
+  url?: string
+  imageUrl?: string
+  videoUrl?: string
   image?: Image
   video?: { asset?: { url?: string } }
 }

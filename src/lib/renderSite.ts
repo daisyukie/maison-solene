@@ -74,8 +74,14 @@ function nextGradient(): string {
  * been uploaded in the CMS yet, so the site never looks broken pre-launch.
  */
 function mediaBlock(media: SiteMedia | undefined, variant: 'ambient' | 'feature' = 'ambient'): string {
-  const videoUrl = media?.video?.asset?.url
-  const imageUrl = media?.image ? urlFor(media.image).width(1600).auto('format').url() : null
+  const videoUrl =
+    media?.videoUrl ||
+    media?.video?.asset?.url ||
+    (media?.url && (/\.(mp4|webm|mov|mkv)($|\?)/i.test(media.url) || media.url.includes('video')) ? media.url : undefined)
+  const imageUrl =
+    media?.imageUrl ||
+    (media?.image ? urlFor(media.image).width(1600).auto('format').url() : undefined) ||
+    (media?.url && !/\.(mp4|webm|mov|mkv)($|\?)/i.test(media.url) ? media.url : undefined)
 
   if (videoUrl) {
     const poster = imageUrl ? ` poster="${escAttr(imageUrl)}"` : ''
