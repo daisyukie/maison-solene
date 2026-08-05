@@ -9,6 +9,43 @@ interface MediaUploaderProps {
   onChange: (updatedMedia: SiteMedia) => void
 }
 
+function compressImage(file: File, maxWidth = 1400, quality = 0.85): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.src = url
+    img.onload = () => {
+      let width = img.width
+      let height = img.height
+
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width)
+        width = maxWidth
+      }
+
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        URL.revokeObjectURL(url)
+        reject(new Error('Canvas context error'))
+        return
+      }
+
+      ctx.drawImage(img, 0, 0, width, height)
+      const dataUrl = canvas.toDataURL('image/webp', quality)
+      URL.revokeObjectURL(url)
+      resolve(dataUrl)
+    }
+    img.onerror = (err) => {
+      URL.revokeObjectURL(url)
+      reject(err)
+    }
+  })
+}
+
 export default function MediaUploader({ label, media = {}, onChange }: MediaUploaderProps) {
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -34,51 +71,47 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
 
     setUploading(true)
 
-    // Read client-side as Data URL (instant fallback guaranteed for Vercel serverless)
-    const reader = new FileReader()
-    reader.onload = async () => {
-      const dataUrl = reader.result as string
-      const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv)$/i.test(file.name)
+    const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv)$/i.test(file.name)
 
-      // Try uploading to server first
-      try {
-        const formData = new FormData()
-        formData.append('file', file)
-
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData,
-        })
-        const data = await res.json()
-
-        if (data.url) {
-          if (isVideo) {
-            onChange({ ...media, url: data.url, videoUrl: data.url })
-          } else {
-            onChange({ ...media, url: data.url, imageUrl: data.url })
-          }
-          setUploading(false)
-          return
-        }
-      } catch {
-        // Ignore server error and fallback to dataUrl below
+    if (isVideo) {
+      // Check video size for Vercel 4.5MB payload limit
+      if (file.size > 3.5 * 1024 * 1024) {
+        alert(
+          'O arquivo de vídeo enviado possui mais de 3.5MB.\nA Vercel limita o salvamento do site a 4.5MB por requisição.\n\nPor favor, cole a URL/link direto do vídeo (ex: Vercel Blob, Cloudinary, YouTube, Imgur ou hospedagem de arquivo) no campo "Ou cole o link/URL direto da foto ou vídeo".'
+        )
+        setUploading(false)
+        return
       }
 
-      // Fallback: use dataUrl directly (works anywhere including Vercel)
-      if (isVideo) {
-        onChange({ ...media, url: dataUrl, videoUrl: dataUrl })
-      } else {
-        onChange({ ...media, url: dataUrl, imageUrl: dataUrl })
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = reader.result as string
+        onChange({ ...media, url: dataUrl, videoUrl: dataUrl, imageUrl: undefined })
+        setUploading(false)
       }
-      setUploading(false)
+      reader.onerror = () => {
+        alert('Erro ao ler arquivo de vídeo')
+        setUploading(false)
+      }
+      reader.readAsDataURL(file)
+      return
     }
 
-    reader.onerror = () => {
-      alert('Erro ao ler arquivo')
+    // Image compression
+    try {
+      const compressedDataUrl = await compressImage(file)
+      onChange({ ...media, url: compressedDataUrl, imageUrl: compressedDataUrl, videoUrl: undefined })
+    } catch {
+      // Fallback uncompressed if canvas compression fails
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = reader.result as string
+        onChange({ ...media, url: dataUrl, imageUrl: dataUrl, videoUrl: undefined })
+      }
+      reader.readAsDataURL(file)
+    } finally {
       setUploading(false)
     }
-
-    reader.readAsDataURL(file)
   }
 
   const handleRemove = () => {
@@ -174,7 +207,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
               fontSize: 13,
             }}
           >
-            Processando mídia...
+            Otimizando mídia...
           </div>
         )}
       </div>
@@ -205,7 +238,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
               cursor: 'pointer',
             }}
           >
-            {uploading ? 'Processando...' : videoUrl || imageUrl ? 'Trocar Mídia' : '+ Enviar Foto ou Vídeo'}
+            {uploading ? 'Otimizando...' : videoUrl || imageUrl ? 'Trocar Mídia' : '+ Enviar Foto ou Vídeo'}
           </button>
 
           <span style={{ fontSize: 11, color: '#7C7369' }}>Suporta JPG, PNG, WEBP, MP4, WEBM</span>
@@ -214,13 +247,13 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
         {/* Direct Link Input Option */}
         <div>
           <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>
-            Ou cole o link/URL direto da foto ou vídeo:
+            Ou cole o link/URL direto da foto ou vídeo (recomendado para vídeos longos/pesados):
           </label>
           <input
             type="text"
             value={rawUrl || ''}
             onChange={(e) => handleUrlInputChange(e.target.value)}
-            placeholder="https://exemplo.com/minha-foto.jpg ou .mp4"
+            placeholder="https://exemplo.com/meu-video.mp4 ou foto.jpg"
             style={{
               width: '100%',
               background: '#0B0809',
