@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
+import { put } from '@vercel/blob'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 
@@ -18,14 +19,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Nenhum arquivo enviado' }, { status: 400 })
     }
 
-    const bytes = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
-    const base64 = buffer.toString('base64')
-    const mime = file.type || (file.name.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg')
-    const dataUrl = `data:${mime};base64,${base64}`
+    // 1. Try Vercel Blob (if BLOB_READ_WRITE_TOKEN is configured in Vercel)
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      try {
+        const blob = await put(file.name, file, { access: 'public' })
+        return NextResponse.json({ success: true, url: blob.url })
+      } catch (err) {
+        console.error('Vercel Blob upload failed:', err)
+      }
+    }
 
-    // Try saving locally if possible
+    // 2. Try local disk upload (development / local server)
     try {
+      const bytes = await file.arrayBuffer()
+      const buffer = Buffer.from(bytes)
       const uploadsDir = path.join(process.cwd(), 'public', 'uploads')
       await mkdir(uploadsDir, { recursive: true })
       const ext = path.extname(file.name) || (file.type.startsWith('video/') ? '.mp4' : '.jpg')
@@ -34,10 +41,16 @@ export async function POST(request: Request) {
       const filePath = path.join(uploadsDir, fileName)
       await writeFile(filePath, buffer)
       return NextResponse.json({ success: true, url: `/uploads/${fileName}` })
-    } catch {
-      // Fallback for serverless Vercel: return base64 Data URL so media displays everywhere immediately
-      return NextResponse.json({ success: true, url: dataUrl })
-    }
+    } catch {}
+
+    // 3. Fallback: Base64 Data URL
+    const bytes = await file.arrayBuffer()
+    const buffer = Buffer.from(bytes)
+    const base64 = buffer.toString('base64')
+    const mime = file.type || (file.name.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg')
+    const dataUrl = `data:${mime};base64,${base64}`
+
+    return NextResponse.json({ success: true, url: dataUrl })
   } catch (err) {
     console.error('Error uploading file:', err)
     return NextResponse.json({ error: 'Erro ao processar upload' }, { status: 500 })

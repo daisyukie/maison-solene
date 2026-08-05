@@ -70,19 +70,32 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
     if (!file) return
 
     setUploading(true)
-
     const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv)$/i.test(file.name)
 
-    if (isVideo) {
-      // Check video size for Vercel 4.5MB payload limit
-      if (file.size > 3.5 * 1024 * 1024) {
-        alert(
-          'O arquivo de vídeo enviado possui mais de 3.5MB.\nA Vercel limita o salvamento do site a 4.5MB por requisição.\n\nPor favor, cole a URL/link direto do vídeo (ex: Vercel Blob, Cloudinary, YouTube, Imgur ou hospedagem de arquivo) no campo "Ou cole o link/URL direto da foto ou vídeo".'
-        )
+    // 1. Try uploading to /api/upload (handles Vercel Blob / server storage)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+
+      if (data.url) {
+        if (isVideo) {
+          onChange({ ...media, url: data.url, videoUrl: data.url, imageUrl: undefined })
+        } else {
+          onChange({ ...media, url: data.url, imageUrl: data.url, videoUrl: undefined })
+        }
         setUploading(false)
         return
       }
+    } catch {}
 
+    // 2. Fallback processing
+    if (isVideo) {
       const reader = new FileReader()
       reader.onload = () => {
         const dataUrl = reader.result as string
@@ -97,12 +110,11 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
       return
     }
 
-    // Image compression
+    // Image compression fallback
     try {
       const compressedDataUrl = await compressImage(file)
       onChange({ ...media, url: compressedDataUrl, imageUrl: compressedDataUrl, videoUrl: undefined })
     } catch {
-      // Fallback uncompressed if canvas compression fails
       const reader = new FileReader()
       reader.onload = () => {
         const dataUrl = reader.result as string
@@ -207,7 +219,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
               fontSize: 13,
             }}
           >
-            Otimizando mídia...
+            Processando mídia...
           </div>
         )}
       </div>
@@ -238,7 +250,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
               cursor: 'pointer',
             }}
           >
-            {uploading ? 'Otimizando...' : videoUrl || imageUrl ? 'Trocar Mídia' : '+ Enviar Foto ou Vídeo'}
+            {uploading ? 'Processando...' : videoUrl || imageUrl ? 'Trocar Mídia' : '+ Enviar Foto ou Vídeo'}
           </button>
 
           <span style={{ fontSize: 11, color: '#7C7369' }}>Suporta JPG, PNG, WEBP, MP4, WEBM</span>
@@ -247,7 +259,7 @@ export default function MediaUploader({ label, media = {}, onChange }: MediaUplo
         {/* Direct Link Input Option */}
         <div>
           <label style={{ fontSize: 11, color: '#C9A25B', display: 'block', marginBottom: 4 }}>
-            Ou cole o link/URL direto da foto ou vídeo (recomendado para vídeos longos/pesados):
+            Ou cole o link/URL direto da foto ou vídeo:
           </label>
           <input
             type="text"
