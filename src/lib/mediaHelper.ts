@@ -16,7 +16,7 @@ export function parseMediaUrl(rawUrl?: string, isExplicitVideo?: boolean, isExpl
     return {
       type: 'vimeo',
       videoId,
-      embedUrl: `https://player.vimeo.com/video/${videoId}?autoplay=1&muted=1&loop=1&autopause=0&background=1&quality=1080p&title=0&byline=0&portrait=0`,
+      embedUrl: `https://player.vimeo.com/video/${videoId}?autoplay=1&muted=1&loop=1&autopause=0&background=1&quality=720p&dnt=1&title=0&byline=0&portrait=0`,
     }
   }
 
